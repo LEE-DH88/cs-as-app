@@ -3,8 +3,18 @@
 export default function CSASDiagnosisApp() {
   const React = require("react");
   const { useMemo, useState } = React;
-
-  const sampleResults = {
+type ResultItem = {
+  product: string;
+  symptom: string;
+  title: string;
+  causes: string[];
+  firstAction: string[];
+  asNeed: string;
+  asLevel: string;
+  parts: string[];
+  csPoint: string;
+};
+  const sampleResults: Record<string, ResultItem> = {
     E1: {
       product: "젖병살균세척기",
       symptom: "E1",

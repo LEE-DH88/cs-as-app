@@ -2,7 +2,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { PutBlobResult } from "@vercel/blob";
-import { upload } from "@vercel/blob/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,14 +142,21 @@ async function uploadPhotos(
   const uploaded: PhotoItem[] = [];
 
   for (const file of Array.from(files)) {
-    const pathname = `ggumbi-return-record/${folder}/${Date.now()}-${file.name}`;
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("folder", folder);
 
-    const blob: PutBlobResult = await upload(pathname, file, {
-      access: "public",
-      handleUploadUrl: "/api/upload",
-      multipart: true,
-      contentType: file.type || "image/jpeg",
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "업로드 실패");
+    }
+
+    const blob = (await response.json()) as PutBlobResult;
 
     uploaded.push({
       id: crypto.randomUUID(),

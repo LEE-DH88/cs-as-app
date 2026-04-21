@@ -17,7 +17,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const pathname = `ggumbi-return-record/${folder}/${Date.now()}-${file.name}`;
 
     const blob = await put(pathname, file, {
-      access: "private",
+      access: "public"
       addRandomSuffix: true,
       contentType: file.type || "image/jpeg",
     });

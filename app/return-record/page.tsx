@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { PutBlobResult } from "@vercel/blob";
+import { upload } from "@vercel/blob/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +35,7 @@ import {
   Upload,
   Wrench,
   XCircle,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -40,7 +43,7 @@ import { motion } from "framer-motion";
 const PRODUCTS = ["휴대용분유포트", "분유쉐이커", "LED분유쉐이커"] as const;
 const RETURN_TYPES = ["일반반품", "변심반품"] as const;
 const INSPECTION_RESULTS = ["정상화 완료", "불량 판정"] as const;
-const STORAGE_KEY = "ggumbi-return-records-v1";
+const STORAGE_KEY = "ggumbi-return-records-v2";
 
 type ProductName = (typeof PRODUCTS)[number];
 type ReturnTypeName = (typeof RETURN_TYPES)[number];
@@ -51,7 +54,9 @@ type PhotoItem = {
   name: string;
   type: string;
   size: number;
-  dataUrl: string;
+  url: string;
+  pathname: string;
+  uploadedAt: string;
 };
 
 type ReturnRecord = {
@@ -131,25 +136,34 @@ function downloadCSV(rows: ReturnRecord[], filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-function readFilesAsDataUrls(fileList: FileList): Promise<PhotoItem[]> {
-  return Promise.all(
-    Array.from(fileList).map(
-      (file) =>
-        new Promise<PhotoItem>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () =>
-            resolve({
-              id: crypto.randomUUID(),
-              name: file.name,
-              type: file.type,
-              size: file.size,
-              dataUrl: String(reader.result),
-            });
-          reader.onerror = () => reject(new Error("파일을 읽지 못했습니다."));
-          reader.readAsDataURL(file);
-        }),
-    ),
-  );
+async function uploadPhotos(
+  files: FileList,
+  folder: "invoice" | "product",
+): Promise<PhotoItem[]> {
+  const uploaded: PhotoItem[] = [];
+
+  for (const file of Array.from(files)) {
+    const pathname = `ggumbi-return-record/${folder}/${Date.now()}-${file.name}`;
+
+    const blob: PutBlobResult = await upload(pathname, file, {
+      access: "public",
+      handleUploadUrl: "/api/upload",
+      multipart: true,
+      contentType: file.type || "image/jpeg",
+    });
+
+    uploaded.push({
+      id: crypto.randomUUID(),
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      url: blob.url,
+      pathname: blob.pathname,
+      uploadedAt: new Date().toISOString(),
+    });
+  }
+
+  return uploaded;
 }
 
 type StatCardProps = {
@@ -193,13 +207,13 @@ function PhotoGrid({ title, photos }: PhotoGridProps) {
         {photos.map((photo) => (
           <a
             key={photo.id}
-            href={photo.dataUrl}
+            href={photo.url}
             target="_blank"
             rel="noreferrer"
             className="overflow-hidden rounded-2xl border bg-white"
           >
             <img
-              src={photo.dataUrl}
+              src={photo.url}
               alt={photo.name}
               className="h-28 w-full object-cover"
             />
@@ -227,6 +241,9 @@ export default function ReturnRecordApp() {
   const [query, setQuery] = useState("");
   const [filterProduct, setFilterProduct] = useState("전체");
   const [filterResult, setFilterResult] = useState("전체");
+  const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
+  const [isUploadingProduct, setIsUploadingProduct] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     try {
@@ -282,12 +299,20 @@ export default function ReturnRecordApp() {
     setMemo("");
     setInvoicePhotos([]);
     setProductPhotos([]);
+    setSaveError("");
 
     if (invoiceInputRef.current) invoiceInputRef.current.value = "";
     if (productInputRef.current) productInputRef.current.value = "";
   };
 
   const handleAddRecord = (): void => {
+    setSaveError("");
+
+    if (isUploadingInvoice || isUploadingProduct) {
+      setSaveError("사진 업로드가 끝난 뒤에 기록 저장을 눌러주세요.");
+      return;
+    }
+
     const newRecord: ReturnRecord = {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
@@ -313,8 +338,18 @@ export default function ReturnRecordApp() {
     const files = e.target.files;
     if (!files?.length) return;
 
-    const uploaded = await readFilesAsDataUrls(files);
-    setInvoicePhotos((prev) => [...prev, ...uploaded]);
+    try {
+      setSaveError("");
+      setIsUploadingInvoice(true);
+      const uploaded = await uploadPhotos(files, "invoice");
+      setInvoicePhotos((prev) => [...prev, ...uploaded]);
+    } catch (error) {
+      console.error(error);
+      setSaveError("송장 사진 업로드 중 오류가 발생했습니다.");
+    } finally {
+      setIsUploadingInvoice(false);
+      if (invoiceInputRef.current) invoiceInputRef.current.value = "";
+    }
   };
 
   const handleProductUpload = async (
@@ -323,8 +358,18 @@ export default function ReturnRecordApp() {
     const files = e.target.files;
     if (!files?.length) return;
 
-    const uploaded = await readFilesAsDataUrls(files);
-    setProductPhotos((prev) => [...prev, ...uploaded]);
+    try {
+      setSaveError("");
+      setIsUploadingProduct(true);
+      const uploaded = await uploadPhotos(files, "product");
+      setProductPhotos((prev) => [...prev, ...uploaded]);
+    } catch (error) {
+      console.error(error);
+      setSaveError("제품 사진 업로드 중 오류가 발생했습니다.");
+    } finally {
+      setIsUploadingProduct(false);
+      if (productInputRef.current) productInputRef.current.value = "";
+    }
   };
 
   const removePhoto = (type: "invoice" | "product", id: string): void => {
@@ -517,27 +562,38 @@ export default function ReturnRecordApp() {
                         onChange={handleInvoiceUpload}
                       />
 
-                      {!!invoicePhotos.length && (
-                        <div className="grid grid-cols-2 gap-3">
-                          {invoicePhotos.map((photo) => (
-                            <div
-                              key={photo.id}
-                              className="relative overflow-hidden rounded-2xl border"
-                            >
-                              <img
-                                src={photo.dataUrl}
-                                alt={photo.name}
-                                className="h-28 w-full object-cover"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => removePhoto("invoice", photo.id)}
-                                className="absolute right-2 top-2 rounded-full bg-white/90 p-1"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                      {(isUploadingInvoice || !!invoicePhotos.length) && (
+                        <div className="space-y-3">
+                          {isUploadingInvoice && (
+                            <div className="flex items-center gap-2 rounded-2xl border bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              송장 사진 업로드 중...
                             </div>
-                          ))}
+                          )}
+
+                          {!!invoicePhotos.length && (
+                            <div className="grid grid-cols-2 gap-3">
+                              {invoicePhotos.map((photo) => (
+                                <div
+                                  key={photo.id}
+                                  className="relative overflow-hidden rounded-2xl border"
+                                >
+                                  <img
+                                    src={photo.url}
+                                    alt={photo.name}
+                                    className="h-28 w-full object-cover"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removePhoto("invoice", photo.id)}
+                                    className="absolute right-2 top-2 rounded-full bg-white/90 p-1"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -569,34 +625,55 @@ export default function ReturnRecordApp() {
                         onChange={handleProductUpload}
                       />
 
-                      {!!productPhotos.length && (
-                        <div className="grid grid-cols-2 gap-3">
-                          {productPhotos.map((photo) => (
-                            <div
-                              key={photo.id}
-                              className="relative overflow-hidden rounded-2xl border"
-                            >
-                              <img
-                                src={photo.dataUrl}
-                                alt={photo.name}
-                                className="h-28 w-full object-cover"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => removePhoto("product", photo.id)}
-                                className="absolute right-2 top-2 rounded-full bg-white/90 p-1"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                      {(isUploadingProduct || !!productPhotos.length) && (
+                        <div className="space-y-3">
+                          {isUploadingProduct && (
+                            <div className="flex items-center gap-2 rounded-2xl border bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              제품 사진 업로드 중...
                             </div>
-                          ))}
+                          )}
+
+                          {!!productPhotos.length && (
+                            <div className="grid grid-cols-2 gap-3">
+                              {productPhotos.map((photo) => (
+                                <div
+                                  key={photo.id}
+                                  className="relative overflow-hidden rounded-2xl border"
+                                >
+                                  <img
+                                    src={photo.url}
+                                    alt={photo.name}
+                                    className="h-28 w-full object-cover"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removePhoto("product", photo.id)}
+                                    className="absolute right-2 top-2 rounded-full bg-white/90 p-1"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
                   </div>
 
+                  {saveError && (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                      {saveError}
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap gap-3">
-                    <Button className="rounded-2xl" onClick={handleAddRecord}>
+                    <Button
+                      className="rounded-2xl"
+                      onClick={handleAddRecord}
+                      disabled={isUploadingInvoice || isUploadingProduct}
+                    >
                       기록 저장
                     </Button>
                     <Button

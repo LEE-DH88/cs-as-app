@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || "";
-  const clientEmail = process.env.GOOGLE_CLOUD_CLIENT_EMAIL || "";
+  const projectId = process.env.GOOGLE_VISION_PROJECT_ID || "";
+  const clientEmail = process.env.GOOGLE_VISION_CLIENT_EMAIL || "";
   const privateKey = process.env.GOOGLE_VISION_PRIVATE_KEY || "";
 
   return NextResponse.json({

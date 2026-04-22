@@ -134,9 +134,9 @@ function collectMatchedKeywords(text: string) {
 }
 
 async function parseImageToText(base64Image: string) {
-  const clientEmail = process.env.GOOGLE_VISION_CLIENT_EMAIL;
-  const privateKey = process.env.GOOGLE_VISION_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  const projectId = process.env.GOOGLE_VISION_PROJECT_ID;
+const clientEmail = process.env.GOOGLE_VISION_CLIENT_EMAIL;
+const privateKey = process.env.GOOGLE_VISION_PRIVATE_KEY?.replace(/\\n/g, "\n");
+const projectId = process.env.GOOGLE_VISION_PROJECT_ID;
 
   if (!clientEmail || !privateKey || !projectId) {
     throw new Error("Google Vision 환경변수가 설정되지 않았습니다.");

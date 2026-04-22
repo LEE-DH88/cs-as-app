@@ -1,210 +1,168 @@
 "use client";
 
-import React, {
-  ChangeEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Camera,
+  ClipboardList,
   Download,
-  FileImage,
   Loader2,
   Package,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
   User,
-  X,
-  ClipboardList,
+  FileText,
   AlertTriangle,
   CheckCircle2,
-  Image as ImageIcon,
-  RefreshCcw,
+  XCircle,
+  Clock3,
+  Smartphone,
+  Database,
 } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type ReturnType =
   | "일반반품"
   | "변심반품"
   | "불량반품"
-  | "불량교환"
-  | "AS"
-  | "검수";
+  | "불량교환";
 
 type ProductType =
   | "휴대용분유포트"
   | "분유쉐이커"
-  | "LED분유쉐이커"
-  | "일반반품"
-  | "변심반품"
-  | "기타";
+  | "LED분유쉐이커";
 
-type ResultType = "정상화 완료" | "불량 판정" | "검사 대기";
+type InspectionResult =
+  | "검사 대기"
+  | "정상화 완료"
+  | "불량 판정"
+  | "후속 확인 필요";
 
-type UploadedImage = {
+type UploadedPhoto = {
   url: string;
-  name: string;
+  pathname?: string;
+  filename: string;
   size: number;
+  contentType?: string;
 };
 
 type ReturnRecord = {
   id: string;
-  registeredAt: string;
+  createdAt: string;
   invoiceNumber: string;
   orderNumber: string;
   customerName: string;
   returnType: ReturnType;
-  productName: string;
-  result: ResultType;
+  productName: ProductType;
+  inspectionResult: InspectionResult;
   note: string;
-  invoicePhotos: UploadedImage[];
-  productPhotos: UploadedImage[];
+  invoicePhotos: UploadedPhoto[];
+  productPhotos: UploadedPhoto[];
 };
 
-type UploadFolder = "invoice" | "product";
-
-const STORAGE_KEY = "ggumbi-return-records-v2";
-
-const RETURN_TYPE_OPTIONS: ReturnType[] = [
+const RETURN_TYPES: ReturnType[] = [
   "일반반품",
   "변심반품",
   "불량반품",
   "불량교환",
-  "AS",
-  "검수",
 ];
 
-const PRODUCT_OPTIONS: ProductType[] = [
+const PRODUCT_TYPES: ProductType[] = [
   "휴대용분유포트",
   "분유쉐이커",
   "LED분유쉐이커",
-  "일반반품",
-  "변심반품",
-  "기타",
 ];
 
-const RESULT_OPTIONS: ResultType[] = ["검사 대기", "정상화 완료", "불량 판정"];
+const RESULT_TYPES: InspectionResult[] = [
+  "검사 대기",
+  "정상화 완료",
+  "불량 판정",
+  "후속 확인 필요",
+];
 
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("ko-KR", {
+const MAX_INVOICE_PHOTOS = 2;
+const MAX_PRODUCT_PHOTOS = 4;
+const MAX_FILE_MB = 5;
+const JPEG_QUALITY = 0.72;
+const IMAGE_MAX_WIDTH = 1600;
+const IMAGE_MAX_HEIGHT = 1600;
+
+function formatDateTime(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("ko-KR", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+  });
 }
 
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unitIndex = 0;
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-
-  return `${value.toFixed(value >= 100 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function escapeCsv(value: string): string {
-  const normalized = value ?? "";
-  if (
-    normalized.includes(",") ||
-    normalized.includes('"') ||
-    normalized.includes("\n")
-  ) {
-    return `"${normalized.replace(/"/g, '""')}"`;
-  }
-  return normalized;
+function downloadCsv(filename: string, rows: string[][]) {
+  const csv = rows
+    .map((row) =>
+      row
+        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+        .join(",")
+    )
+    .join("\n");
+
+  const blob = new Blob(["\ufeff" + csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-function normalizeRecords(raw: unknown): ReturnRecord[] {
-  if (!Array.isArray(raw)) return [];
-
-  return raw
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const record = item as Partial<ReturnRecord> & {
-        invoicePhotos?: Array<string | UploadedImage>;
-        productPhotos?: Array<string | UploadedImage>;
-      };
-
-      const normalizePhotos = (
-        photos: Array<string | UploadedImage> | undefined
-      ): UploadedImage[] => {
-        if (!Array.isArray(photos)) return [];
-        return photos
-          .map((photo) => {
-            if (typeof photo === "string") {
-              return {
-                url: photo,
-                name: photo.split("/").pop() || "image.jpg",
-                size: 0,
-              };
-            }
-            if (
-              photo &&
-              typeof photo === "object" &&
-              typeof photo.url === "string"
-            ) {
-              return {
-                url: photo.url,
-                name: photo.name || photo.url.split("/").pop() || "image.jpg",
-                size: Number(photo.size || 0),
-              };
-            }
-            return null;
-          })
-          .filter((photo): photo is UploadedImage => Boolean(photo));
-      };
-
-      return {
-        id: String(record.id || crypto.randomUUID()),
-        registeredAt: String(record.registeredAt || new Date().toISOString()),
-        invoiceNumber: String(record.invoiceNumber || ""),
-        orderNumber: String(record.orderNumber || ""),
-        customerName: String(record.customerName || ""),
-        returnType: (record.returnType as ReturnType) || "일반반품",
-        productName: String(record.productName || "기타"),
-        result: (record.result as ResultType) || "검사 대기",
-        note: String(record.note || ""),
-        invoicePhotos: normalizePhotos(record.invoicePhotos),
-        productPhotos: normalizePhotos(record.productPhotos),
-      };
-    })
-    .filter((record): record is ReturnRecord => Boolean(record));
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
 async function compressImage(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file;
 
-  const imageUrl = URL.createObjectURL(file);
-
+  const blobUrl = URL.createObjectURL(file);
   try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const element = new Image();
-      element.onload = () => resolve(element);
-      element.onerror = reject;
-      element.src = imageUrl;
-    });
-
-    const maxWidth = 1800;
-    const maxHeight = 1800;
+    const img = await loadImageElement(blobUrl);
 
     let { width, height } = img;
+    const ratio = Math.min(
+      1,
+      IMAGE_MAX_WIDTH / width,
+      IMAGE_MAX_HEIGHT / height
+    );
 
-    if (width > maxWidth || height > maxHeight) {
-      const ratio = Math.min(maxWidth / width, maxHeight / height);
-      width = Math.round(width * ratio);
-      height = Math.round(height * ratio);
-    }
+    width = Math.round(width * ratio);
+    height = Math.round(height * ratio);
 
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -215,1069 +173,1143 @@ async function compressImage(file: File): Promise<File> {
 
     ctx.drawImage(img, 0, 0, width, height);
 
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", 0.78);
+    const blob: Blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (result) => {
+          if (!result) {
+            reject(new Error("이미지 압축에 실패했습니다."));
+            return;
+          }
+          resolve(result);
+        },
+        "image/jpeg",
+        JPEG_QUALITY
+      );
     });
 
-    if (!blob) return file;
-
-    const compressedName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
-
-    if (blob.size >= file.size) {
-      return file;
-    }
-
-    return new File([blob], compressedName, {
+    const safeName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], safeName, {
       type: "image/jpeg",
       lastModified: Date.now(),
     });
   } finally {
-    URL.revokeObjectURL(imageUrl);
+    URL.revokeObjectURL(blobUrl);
   }
 }
 
-async function uploadImages(
-  files: File[],
-  folder: UploadFolder
-): Promise<UploadedImage[]> {
-  const uploaded: UploadedImage[] = [];
+async function uploadSingleFile(
+  file: File,
+  folder: "invoice" | "product"
+): Promise<UploadedPhoto> {
+  const optimized = await compressImage(file);
 
-  for (const originalFile of files) {
-    const file = await compressImage(originalFile);
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("folder", folder);
+  const formData = new FormData();
+  formData.append("file", optimized);
+  formData.append("folder", folder);
 
-    const response = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-    });
+  const response = await fetch("/api/upload", {
+    method: "POST",
+    body: formData,
+  });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || "업로드 실패");
-    }
+  const data = await response.json();
 
-    const data = await response.json();
-
-    uploaded.push({
-      url: data.url,
-      name: file.name,
-      size: file.size,
-    });
+  if (!response.ok) {
+    throw new Error(data?.error || "업로드에 실패했습니다.");
   }
 
-  return uploaded;
+  return {
+    url: data.url,
+    pathname: data.pathname,
+    filename: optimized.name,
+    size: optimized.size,
+    contentType: optimized.type,
+  };
 }
 
 export default function ReturnRecordApp() {
   const [records, setRecords] = useState<ReturnRecord[]>([]);
-  const [activeTab, setActiveTab] = useState<"register" | "records">("register");
+  const [loadingRecords, setLoadingRecords] = useState(true);
+  const [savingRecord, setSavingRecord] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [returnType, setReturnType] = useState<ReturnType>("일반반품");
-  const [productName, setProductName] = useState<string>("휴대용분유포트");
-  const [result, setResult] = useState<ResultType>("검사 대기");
+  const [productName, setProductName] = useState<ProductType>("휴대용분유포트");
+  const [inspectionResult, setInspectionResult] =
+    useState<InspectionResult>("검사 대기");
   const [note, setNote] = useState("");
 
-  const [invoicePhotos, setInvoicePhotos] = useState<UploadedImage[]>([]);
-  const [productPhotos, setProductPhotos] = useState<UploadedImage[]>([]);
+  const [invoicePhotos, setInvoicePhotos] = useState<UploadedPhoto[]>([]);
+  const [productPhotos, setProductPhotos] = useState<UploadedPhoto[]>([]);
 
-  const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
-  const [isUploadingProduct, setIsUploadingProduct] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [uploadingInvoice, setUploadingInvoice] = useState(false);
+  const [uploadingProduct, setUploadingProduct] = useState(false);
 
-  const [searchText, setSearchText] = useState("");
-  const [filterProduct, setFilterProduct] = useState("전체 제품");
-  const [filterResult, setFilterResult] = useState("전체 결과");
-  const [selectedRecord, setSelectedRecord] = useState<ReturnRecord | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterProduct, setFilterProduct] = useState<string>("전체");
+  const [filterResult, setFilterResult] = useState<string>("전체");
 
-  const [errorMessage, setErrorMessage] = useState("");
+  const [statusMessage, setStatusMessage] = useState<string>("");
+  const [statusError, setStatusError] = useState<string>("");
 
-  const invoiceInputRef = useRef<HTMLInputElement | null>(null);
-  const productInputRef = useRef<HTMLInputElement | null>(null);
+  async function fetchRecords() {
+    try {
+      setLoadingRecords(true);
+      setStatusError("");
+
+      const response = await fetch("/api/records", {
+        cache: "no-store",
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "기록 조회에 실패했습니다.");
+      }
+
+      setRecords(Array.isArray(data.records) ? data.records : []);
+    } catch (error) {
+      setStatusError(
+        error instanceof Error ? error.message : "기록을 불러오지 못했습니다."
+      );
+    } finally {
+      setLoadingRecords(false);
+    }
+  }
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return;
-      const parsed = JSON.parse(saved);
-      setRecords(normalizeRecords(parsed));
-    } catch (error) {
-      console.error("기록 불러오기 실패", error);
-    }
+    fetchRecords();
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-  }, [records]);
+  const summary = useMemo(() => {
+    const total = records.length;
+    const normal = records.filter((r) => r.inspectionResult === "정상화 완료").length;
+    const defective = records.filter((r) => r.inspectionResult === "불량 판정").length;
+    const followUp = records.filter((r) => r.inspectionResult === "후속 확인 필요").length;
 
-  const totalPhotoCount = useMemo(() => {
-    return records.reduce(
-      (sum, record) =>
-        sum + record.invoicePhotos.length + record.productPhotos.length,
-      0
-    );
-  }, [records]);
-
-  const totalPhotoBytes = useMemo(() => {
-    return records.reduce((sum, record) => {
-      const invoiceSize = record.invoicePhotos.reduce(
-        (acc, photo) => acc + (photo.size || 0),
-        0
-      );
-      const productSize = record.productPhotos.reduce(
-        (acc, photo) => acc + (photo.size || 0),
-        0
-      );
-      return sum + invoiceSize + productSize;
+    const totalPhotoSize = records.reduce((acc, record) => {
+      const invoiceSize = record.invoicePhotos.reduce((s, p) => s + (p.size || 0), 0);
+      const productSize = record.productPhotos.reduce((s, p) => s + (p.size || 0), 0);
+      return acc + invoiceSize + productSize;
     }, 0);
+
+    return {
+      total,
+      normal,
+      defective,
+      followUp,
+      totalPhotoSize,
+    };
   }, [records]);
-
-  const normalCount = useMemo(
-    () => records.filter((record) => record.result === "정상화 완료").length,
-    [records]
-  );
-
-  const defectiveCount = useMemo(
-    () => records.filter((record) => record.result === "불량 판정").length,
-    [records]
-  );
-
-  const pendingCount = useMemo(
-    () => records.filter((record) => record.result === "검사 대기").length,
-    [records]
-  );
 
   const filteredRecords = useMemo(() => {
-    return records
-      .filter((record) => {
-        const text = searchText.trim().toLowerCase();
+    return records.filter((record) => {
+      const matchesSearch =
+        !searchTerm ||
+        [
+          record.invoiceNumber,
+          record.orderNumber,
+          record.customerName,
+          record.returnType,
+          record.productName,
+          record.inspectionResult,
+          record.note,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase());
 
-        const matchesText =
-          !text ||
-          [
-            record.invoiceNumber,
-            record.orderNumber,
-            record.customerName,
-            record.returnType,
-            record.productName,
-            record.result,
-            record.note,
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(text);
+      const matchesProduct =
+        filterProduct === "전체" || record.productName === filterProduct;
 
-        const matchesProduct =
-          filterProduct === "전체 제품" || record.productName === filterProduct;
+      const matchesResult =
+        filterResult === "전체" || record.inspectionResult === filterResult;
 
-        const matchesResult =
-          filterResult === "전체 결과" || record.result === filterResult;
+      return matchesSearch && matchesProduct && matchesResult;
+    });
+  }, [records, searchTerm, filterProduct, filterResult]);
 
-        return matchesText && matchesProduct && matchesResult;
-      })
-      .sort(
-        (a, b) =>
-          new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
-      );
-  }, [records, searchText, filterProduct, filterResult]);
-
-  const resetForm = (): void => {
+  function resetForm() {
     setInvoiceNumber("");
     setOrderNumber("");
     setCustomerName("");
     setReturnType("일반반품");
     setProductName("휴대용분유포트");
-    setResult("검사 대기");
+    setInspectionResult("검사 대기");
     setNote("");
     setInvoicePhotos([]);
     setProductPhotos([]);
-    setErrorMessage("");
-    if (invoiceInputRef.current) invoiceInputRef.current.value = "";
-    if (productInputRef.current) productInputRef.current.value = "";
-  };
+    setStatusMessage("");
+    setStatusError("");
+  }
 
-  const handleUpload = async (
-    event: ChangeEvent<HTMLInputElement>,
-    folder: UploadFolder
-  ): Promise<void> => {
+  async function handleInvoiceUpload(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
     const files = Array.from(event.target.files || []);
-    if (files.length === 0) return;
+    if (!files.length) return;
 
-    setErrorMessage("");
+    if (invoicePhotos.length + files.length > MAX_INVOICE_PHOTOS) {
+      setStatusError(`송장 사진은 최대 ${MAX_INVOICE_PHOTOS}장까지 등록할 수 있습니다.`);
+      event.target.value = "";
+      return;
+    }
+
+    const overSize = files.find((file) => file.size > MAX_FILE_MB * 1024 * 1024);
+    if (overSize) {
+      setStatusError(`업로드 전 원본 기준 ${MAX_FILE_MB}MB 이하 파일만 선택해주세요.`);
+      event.target.value = "";
+      return;
+    }
 
     try {
-      if (folder === "invoice") setIsUploadingInvoice(true);
-      if (folder === "product") setIsUploadingProduct(true);
+      setUploadingInvoice(true);
+      setStatusError("");
+      setStatusMessage("송장 사진 업로드 중입니다...");
 
-      const limit = folder === "invoice" ? 2 : 4;
-      const currentPhotos = folder === "invoice" ? invoicePhotos : productPhotos;
+      const uploaded = await Promise.all(
+        files.map((file) => uploadSingleFile(file, "invoice"))
+      );
 
-      if (currentPhotos.length + files.length > limit) {
-        throw new Error(
-          folder === "invoice"
-            ? `송장 사진은 최대 ${limit}장까지 업로드할 수 있습니다.`
-            : `제품 사진은 최대 ${limit}장까지 업로드할 수 있습니다.`
-        );
-      }
-
-      const uploaded = await uploadImages(files, folder);
-
-      if (folder === "invoice") {
-        setInvoicePhotos((prev) => [...prev, ...uploaded]);
-      } else {
-        setProductPhotos((prev) => [...prev, ...uploaded]);
-      }
+      setInvoicePhotos((prev) => [...prev, ...uploaded]);
+      setStatusMessage("송장 사진 업로드가 완료되었습니다.");
     } catch (error) {
-      console.error(error);
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "사진 업로드 중 오류가 발생했습니다."
+      setStatusError(
+        error instanceof Error ? error.message : "송장 사진 업로드 중 오류가 발생했습니다."
       );
     } finally {
-      if (folder === "invoice") setIsUploadingInvoice(false);
-      if (folder === "product") setIsUploadingProduct(false);
+      setUploadingInvoice(false);
       event.target.value = "";
     }
-  };
+  }
 
-  const removePhotoFromForm = async (
-    folder: UploadFolder,
-    targetUrl: string
-  ): Promise<void> => {
-    const confirmed = window.confirm("이 사진을 업로드 목록에서 제거하시겠습니까?");
+  async function handleProductUpload(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    if (productPhotos.length + files.length > MAX_PRODUCT_PHOTOS) {
+      setStatusError(`제품 사진은 최대 ${MAX_PRODUCT_PHOTOS}장까지 등록할 수 있습니다.`);
+      event.target.value = "";
+      return;
+    }
+
+    const overSize = files.find((file) => file.size > MAX_FILE_MB * 1024 * 1024);
+    if (overSize) {
+      setStatusError(`업로드 전 원본 기준 ${MAX_FILE_MB}MB 이하 파일만 선택해주세요.`);
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      setUploadingProduct(true);
+      setStatusError("");
+      setStatusMessage("제품 사진 업로드 중입니다...");
+
+      const uploaded = await Promise.all(
+        files.map((file) => uploadSingleFile(file, "product"))
+      );
+
+      setProductPhotos((prev) => [...prev, ...uploaded]);
+      setStatusMessage("제품 사진 업로드가 완료되었습니다.");
+    } catch (error) {
+      setStatusError(
+        error instanceof Error ? error.message : "제품 사진 업로드 중 오류가 발생했습니다."
+      );
+    } finally {
+      setUploadingProduct(false);
+      event.target.value = "";
+    }
+  }
+
+  async function handleRemoveUploadedPhoto(
+    photo: UploadedPhoto,
+    type: "invoice" | "product"
+  ) {
+    const confirmed = window.confirm("이 사진을 삭제하시겠습니까?");
     if (!confirmed) return;
 
     try {
-      await fetch("/api/delete-blob", {
+      setStatusError("");
+      setStatusMessage("사진 삭제 중입니다...");
+
+      const response = await fetch("/api/delete-blob", {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ urls: [targetUrl] }),
+        body: JSON.stringify({
+          urls: [photo.url],
+        }),
       });
 
-      if (folder === "invoice") {
-        setInvoicePhotos((prev) => prev.filter((photo) => photo.url !== targetUrl));
-      } else {
-        setProductPhotos((prev) => prev.filter((photo) => photo.url !== targetUrl));
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "사진 삭제에 실패했습니다.");
       }
+
+      if (type === "invoice") {
+        setInvoicePhotos((prev) => prev.filter((item) => item.url !== photo.url));
+      } else {
+        setProductPhotos((prev) => prev.filter((item) => item.url !== photo.url));
+      }
+
+      setStatusMessage("사진이 삭제되었습니다.");
     } catch (error) {
-      console.error(error);
-      alert("사진 삭제 중 오류가 발생했습니다.");
+      setStatusError(
+        error instanceof Error ? error.message : "사진 삭제 중 오류가 발생했습니다."
+      );
     }
-  };
+  }
 
-  const handleSave = async (): Promise<void> => {
-    setErrorMessage("");
-
-    if (!productName.trim()) {
-      setErrorMessage("제품명을 입력해주세요.");
+  async function handleSaveRecord() {
+    if (!invoicePhotos.length) {
+      setStatusError("송장 사진은 최소 1장 이상 등록해주세요.");
       return;
     }
 
-    if (invoicePhotos.length === 0) {
-      setErrorMessage("송장 사진은 최소 1장 필요합니다.");
+    if (!invoiceNumber.trim() && !orderNumber.trim() && !customerName.trim()) {
+      setStatusError("송장번호 / 주문번호 / 고객명 중 최소 1개는 입력해주세요.");
       return;
     }
+
+    const newRecord: ReturnRecord = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      invoiceNumber: invoiceNumber.trim(),
+      orderNumber: orderNumber.trim(),
+      customerName: customerName.trim(),
+      returnType,
+      productName,
+      inspectionResult,
+      note: note.trim(),
+      invoicePhotos,
+      productPhotos,
+    };
 
     try {
-      setIsSaving(true);
+      setSavingRecord(true);
+      setStatusError("");
+      setStatusMessage("기록 저장 중입니다...");
 
-      const newRecord: ReturnRecord = {
-        id: crypto.randomUUID(),
-        registeredAt: new Date().toISOString(),
-        invoiceNumber: invoiceNumber.trim(),
-        orderNumber: orderNumber.trim(),
-        customerName: customerName.trim(),
-        returnType,
-        productName: productName.trim(),
-        result,
-        note: note.trim(),
-        invoicePhotos,
-        productPhotos,
-      };
+      const response = await fetch("/api/records", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newRecord),
+      });
 
-      setRecords((prev) => [newRecord, ...prev]);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "기록 저장에 실패했습니다.");
+      }
+
+      await fetchRecords();
       resetForm();
-      setActiveTab("records");
+      setStatusMessage("기록이 서버에 저장되었습니다. PC와 휴대폰에서 동일하게 조회됩니다.");
     } catch (error) {
-      console.error(error);
-      setErrorMessage("기록 저장 중 오류가 발생했습니다.");
+      setStatusError(
+        error instanceof Error ? error.message : "기록 저장 중 오류가 발생했습니다."
+      );
     } finally {
-      setIsSaving(false);
+      setSavingRecord(false);
     }
-  };
+  }
 
-  const handleDelete = async (id: string): Promise<void> => {
-    const target = records.find((record) => record.id === id);
-    if (!target) return;
-
+  async function handleDeleteRecord(record: ReturnRecord) {
     const confirmed = window.confirm(
-      "삭제하시겠습니까?\n기록과 연결된 사진도 Blob 저장소에서 함께 삭제됩니다."
+      "삭제하시겠습니까?\n기록과 연결된 사진도 함께 삭제됩니다."
     );
     if (!confirmed) return;
 
     try {
-      setDeletingId(id);
+      setDeletingId(record.id);
+      setStatusError("");
+      setStatusMessage("기록과 사진을 함께 삭제 중입니다...");
 
-      const urls = [
-        ...target.invoicePhotos.map((photo) => photo.url),
-        ...target.productPhotos.map((photo) => photo.url),
-      ].filter(Boolean);
+      const response = await fetch("/api/records", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: record.id,
+          photoUrls: [
+            ...record.invoicePhotos.map((photo) => photo.url),
+            ...record.productPhotos.map((photo) => photo.url),
+          ],
+        }),
+      });
 
-      if (urls.length > 0) {
-        const response = await fetch("/api/delete-blob", {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ urls }),
-        });
+      const data = await response.json();
 
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || "Blob 사진 삭제 실패");
-        }
+      if (!response.ok) {
+        throw new Error(data?.error || "기록 삭제에 실패했습니다.");
       }
 
-      setRecords((prev) => prev.filter((record) => record.id !== id));
-
-      if (selectedRecord?.id === id) {
-        setSelectedRecord(null);
-      }
+      await fetchRecords();
+      setStatusMessage("기록과 연결 사진이 함께 삭제되었습니다.");
     } catch (error) {
-      console.error(error);
-      alert("기록 삭제 중 오류가 발생했습니다.");
+      setStatusError(
+        error instanceof Error ? error.message : "삭제 중 오류가 발생했습니다."
+      );
     } finally {
       setDeletingId(null);
     }
-  };
+  }
 
-  const downloadCsv = (): void => {
-    const header = [
-      "등록일자",
-      "송장번호",
-      "주문번호",
-      "고객명",
-      "반품유형",
-      "제품명",
-      "검사결과",
-      "비고",
-      "송장사진수",
-      "제품사진수",
+  function handleDownloadCsv() {
+    const rows: string[][] = [
+      [
+        "등록일자",
+        "송장번호",
+        "주문번호",
+        "고객명",
+        "반품유형",
+        "제품명",
+        "검사결과",
+        "비고",
+      ],
+      ...filteredRecords.map((record) => [
+        formatDateTime(record.createdAt),
+        record.invoiceNumber,
+        record.orderNumber,
+        record.customerName,
+        record.returnType,
+        record.productName,
+        record.inspectionResult,
+        record.note,
+      ]),
     ];
 
-    const rows = filteredRecords.map((record) => [
-      formatDateTime(record.registeredAt),
-      record.invoiceNumber,
-      record.orderNumber,
-      record.customerName,
-      record.returnType,
-      record.productName,
-      record.result,
-      record.note,
-      String(record.invoicePhotos.length),
-      String(record.productPhotos.length),
-    ]);
+    const today = new Date();
+    const filename = `3종반품기록_${today.getFullYear()}${String(
+      today.getMonth() + 1
+    ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.csv`;
 
-    const csv = [
-      header.join(","),
-      ...rows.map((row) => row.map((cell) => escapeCsv(cell)).join(",")),
-    ].join("\n");
-
-    const blob = new Blob(["\uFEFF" + csv], {
-      type: "text/csv;charset=utf-8;",
-    });
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `반품기록_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const StatCard = ({
-    title,
-    value,
-    sub,
-    icon,
-  }: {
-    title: string;
-    value: string | number;
-    sub: string;
-    icon: React.ReactNode;
-  }) => (
-    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{value}</p>
-        </div>
-        <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">{icon}</div>
-      </div>
-      <p className="text-sm text-slate-500">{sub}</p>
-    </div>
-  );
-
-  const PhotoGrid = ({
-    photos,
-    title,
-    onRemove,
-  }: {
-    photos: UploadedImage[];
-    title: string;
-    onRemove?: (url: string) => void;
-  }) => {
-    if (photos.length === 0) {
-      return (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-          등록된 사진이 없습니다.
-        </div>
-      );
-    }
-
-    return (
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        {photos.map((photo) => (
-          <div
-            key={photo.url}
-            className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
-          >
-            <a href={photo.url} target="_blank" rel="noreferrer">
-              <img
-                src={photo.url}
-                alt={photo.name}
-                className="h-32 w-full object-cover"
-              />
-            </a>
-            <div className="space-y-2 p-3">
-              <p className="truncate text-xs text-slate-600">{photo.name}</p>
-              <p className="text-xs text-slate-400">{formatBytes(photo.size)}</p>
-              {onRemove ? (
-                <button
-                  type="button"
-                  onClick={() => onRemove(photo.url)}
-                  className="inline-flex items-center gap-1 rounded-xl border border-rose-200 px-2 py-1 text-xs font-medium text-rose-600 transition hover:bg-rose-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  제거
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
+    downloadCsv(filename, rows);
+  }
 
   return (
-    <div className="min-h-screen bg-slate-100">
-      <div className="mx-auto max-w-7xl px-4 py-6 md:px-6">
-        <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 bg-gradient-to-r from-slate-900 to-slate-700 px-6 py-7 text-white">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+    <div className="min-h-screen bg-slate-50">
+      <div className="mx-auto max-w-7xl p-4 md:p-8">
+        <div className="mb-6 rounded-3xl border bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+                3종 반품 검사/수리 기록 프로그램
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                대상: 휴대용분유포트 · 분유쉐이커 · LED분유쉐이커 / 일반반품 ·
+                변심반품 · 불량반품 · 불량교환
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                기록은 서버에 저장되므로 PC와 휴대폰에서 동일하게 조회됩니다.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={fetchRecords} disabled={loadingRecords}>
+                {loadingRecords ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                새로고침
+              </Button>
+
+              <Button variant="outline" onClick={handleDownloadCsv}>
+                <Download className="mr-2 h-4 w-4" />
+                CSV 내려받기
+              </Button>
+            </div>
+          </div>
+
+          {(statusMessage || statusError) && (
+            <div className="mt-4 space-y-2">
+              {statusMessage && (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                  {statusMessage}
+                </div>
+              )}
+              {statusError && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {statusError}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <Card className="rounded-3xl shadow-sm">
+            <CardContent className="flex items-center justify-between p-6">
               <div>
-                <h1 className="text-3xl font-bold tracking-tight">
-                  3종 반품 검사/수리 기록 프로그램
-                </h1>
-                <p className="mt-2 text-sm text-slate-200">
-                  대상: 휴대용분유포트 · 분유쉐이커 · LED분유쉐이커 · 일반반품 · 변심반품
+                <p className="text-sm text-slate-500">전체 기록</p>
+                <p className="mt-2 text-3xl font-bold">{summary.total}</p>
+                <p className="mt-1 text-xs text-slate-500">누적 등록 건수</p>
+              </div>
+              <ClipboardList className="h-10 w-10 text-slate-300" />
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl shadow-sm">
+            <CardContent className="flex items-center justify-between p-6">
+              <div>
+                <p className="text-sm text-slate-500">정상화 완료</p>
+                <p className="mt-2 text-3xl font-bold">{summary.normal}</p>
+                <p className="mt-1 text-xs text-slate-500">재고 추가 가능 대상</p>
+              </div>
+              <CheckCircle2 className="h-10 w-10 text-slate-300" />
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl shadow-sm">
+            <CardContent className="flex items-center justify-between p-6">
+              <div>
+                <p className="text-sm text-slate-500">불량 판정</p>
+                <p className="mt-2 text-3xl font-bold">{summary.defective}</p>
+                <p className="mt-1 text-xs text-slate-500">폐기/불량 처리 대상</p>
+              </div>
+              <XCircle className="h-10 w-10 text-slate-300" />
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl shadow-sm">
+            <CardContent className="flex items-center justify-between p-6">
+              <div>
+                <p className="text-sm text-slate-500">후속 확인 필요</p>
+                <p className="mt-2 text-3xl font-bold">{summary.followUp}</p>
+                <p className="mt-1 text-xs text-slate-500">추가 점검 대상</p>
+              </div>
+              <Clock3 className="h-10 w-10 text-slate-300" />
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl shadow-sm">
+            <CardContent className="flex items-center justify-between p-6">
+              <div>
+                <p className="text-sm text-slate-500">사진 사용량</p>
+                <p className="mt-2 text-3xl font-bold">
+                  {formatBytes(summary.totalPhotoSize)}
                 </p>
-                <p className="mt-1 text-sm text-slate-300">
-                  송장/제품 사진을 기반으로 반품 기록을 남기고, 정상화/불량 판정을 관리합니다.
-                </p>
+                <p className="mt-1 text-xs text-slate-500">저장된 사진 총합</p>
               </div>
+              <Database className="h-10 w-10 text-slate-300" />
+            </CardContent>
+          </Card>
+        </div>
 
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={downloadCsv}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
-                >
-                  <Download className="h-4 w-4" />
-                  CSV 내려받기
-                </button>
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
-                >
-                  <RefreshCcw className="h-4 w-4" />
-                  입력 초기화
-                </button>
-              </div>
-            </div>
-          </div>
+        <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+          <Card className="rounded-3xl shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-2xl">새 기록 등록</CardTitle>
+              <p className="text-sm text-slate-500">
+                사진은 업로드 전 자동 압축되어 저장공간 사용량을 줄입니다.
+              </p>
+            </CardHeader>
 
-          <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-5">
-            <StatCard
-              title="전체 기록"
-              value={records.length}
-              sub="누적 등록 건수"
-              icon={<ClipboardList className="h-5 w-5" />}
-            />
-            <StatCard
-              title="정상화 완료"
-              value={normalCount}
-              sub="재고 추가 가능 대상"
-              icon={<CheckCircle2 className="h-5 w-5" />}
-            />
-            <StatCard
-              title="불량 판정"
-              value={defectiveCount}
-              sub="폐기/불량 처리 대상"
-              icon={<AlertTriangle className="h-5 w-5" />}
-            />
-            <StatCard
-              title="검사 대기"
-              value={pendingCount}
-              sub="후속 확인 필요"
-              icon={<Package className="h-5 w-5" />}
-            />
-            <StatCard
-              title="사진 사용량"
-              value={formatBytes(totalPhotoBytes)}
-              sub={`총 ${totalPhotoCount}장 저장`}
-              icon={<ImageIcon className="h-5 w-5" />}
-            />
-          </div>
-
-          <div className="px-4 pb-4">
-            <div className="grid grid-cols-2 overflow-hidden rounded-2xl bg-slate-100 p-1">
-              <button
-                type="button"
-                onClick={() => setActiveTab("register")}
-                className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                  activeTab === "register"
-                    ? "bg-white text-slate-900 shadow-sm"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                기록 등록
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("records")}
-                className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                  activeTab === "records"
-                    ? "bg-white text-slate-900 shadow-sm"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                기록 조회
-              </button>
-            </div>
-          </div>
-
-          <div className="px-4 pb-6">
-            {activeTab === "register" ? (
-              <div className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
-                <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                  <h2 className="text-xl font-bold text-slate-900">새 기록 등록</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    사진은 자동 압축 후 업로드되어 저장공간 사용량을 줄입니다.
-                  </p>
-
-                  <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        송장번호
-                      </label>
-                      <input
-                        value={invoiceNumber}
-                        onChange={(e) => setInvoiceNumber(e.target.value)}
-                        placeholder="예: 1234567890"
-                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        주문번호
-                      </label>
-                      <input
-                        value={orderNumber}
-                        onChange={(e) => setOrderNumber(e.target.value)}
-                        placeholder="예: 20260421-0001"
-                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        고객명
-                      </label>
-                      <div className="relative">
-                        <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                          value={customerName}
-                          onChange={(e) => setCustomerName(e.target.value)}
-                          placeholder="예: 홍길동"
-                          className="w-full rounded-2xl border border-slate-200 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-slate-400"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        반품유형
-                      </label>
-                      <select
-                        value={returnType}
-                        onChange={(e) => setReturnType(e.target.value as ReturnType)}
-                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
-                      >
-                        {RETURN_TYPE_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        제품명
-                      </label>
-                      <select
-                        value={productName}
-                        onChange={(e) => setProductName(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
-                      >
-                        {PRODUCT_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        검사결과
-                      </label>
-                      <select
-                        value={result}
-                        onChange={(e) => setResult(e.target.value as ResultType)}
-                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
-                      >
-                        {RESULT_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="mt-5">
-                    <label className="mb-2 block text-sm font-semibold text-slate-700">
-                      비고
-                    </label>
-                    <textarea
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      rows={5}
-                      placeholder="예: 검사 완료 후 정상화 / 모터 불량으로 불량 판정 / 안성물류 송장 매칭 완료 등"
-                      className="w-full rounded-3xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
-                    />
-                  </div>
-
-                  <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="font-semibold text-slate-900">송장 사진</h3>
-                          <p className="text-sm text-slate-500">
-                            최대 2장 / 필수 / 자동 압축 업로드
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => invoiceInputRef.current?.click()}
-                          disabled={isUploadingInvoice}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isUploadingInvoice ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Upload className="h-4 w-4" />
-                          )}
-                          업로드
-                        </button>
-                      </div>
-
-                      <input
-                        ref={invoiceInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => void handleUpload(e, "invoice")}
-                      />
-
-                      <PhotoGrid
-                        photos={invoicePhotos}
-                        title="송장 사진"
-                        onRemove={(url) => void removePhotoFromForm("invoice", url)}
-                      />
-                    </div>
-
-                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="font-semibold text-slate-900">제품 사진</h3>
-                          <p className="text-sm text-slate-500">
-                            최대 4장 / 선택 / 외관/불량 상태 기록
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => productInputRef.current?.click()}
-                          disabled={isUploadingProduct}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isUploadingProduct ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Upload className="h-4 w-4" />
-                          )}
-                          업로드
-                        </button>
-                      </div>
-
-                      <input
-                        ref={productInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => void handleUpload(e, "product")}
-                      />
-
-                      <PhotoGrid
-                        photos={productPhotos}
-                        title="제품 사진"
-                        onRemove={(url) => void removePhotoFromForm("product", url)}
-                      />
-                    </div>
-                  </div>
-
-                  {errorMessage ? (
-                    <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                      {errorMessage}
-                    </div>
-                  ) : null}
-
-                  <div className="mt-6 flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={() => void handleSave()}
-                      disabled={isSaving}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isSaving ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          저장 중...
-                        </>
-                      ) : (
-                        <>
-                          <ClipboardList className="h-4 w-4" />
-                          기록 저장
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={resetForm}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-                    >
-                      <RefreshCcw className="h-4 w-4" />
-                      입력 초기화
-                    </button>
-                  </div>
+            <CardContent className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>송장번호</Label>
+                  <Input
+                    value={invoiceNumber}
+                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                    placeholder="예: 1234567890"
+                    className="rounded-2xl"
+                  />
                 </div>
 
-                <div className="space-y-4">
-                  <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 className="text-lg font-bold text-slate-900">운영 기준</h3>
-                    <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                      <ol className="space-y-2 text-sm leading-6 text-slate-700">
-                        <li>1. 3종 제품 및 일반/변심 반품은 사진 기준으로 기록합니다.</li>
-                        <li>2. 송장사진은 주문번호 대체 확인 자료로 활용 가능합니다.</li>
-                        <li>3. 검사 후 정상화 / 불량 판정 / 검사 대기로 구분합니다.</li>
-                        <li>4. 제품 사진은 외관 상태, 침수 흔적, 불량 흔적 기록용입니다.</li>
-                        <li>5. 삭제 시 기록과 사진이 함께 제거되므로 신중히 처리합니다.</li>
-                      </ol>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 className="text-lg font-bold text-slate-900">실사용 개선 포인트</h3>
-                    <div className="mt-4 space-y-3 text-sm text-slate-700">
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="font-semibold text-slate-900">1. 사진 용량 관리</p>
-                        <p className="mt-1">
-                          업로드 전 자동 압축, 송장 2장 / 제품 4장 제한으로 저장공간 낭비를 줄였습니다.
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="font-semibold text-slate-900">2. 검색성 강화</p>
-                        <p className="mt-1">
-                          송장번호, 주문번호, 고객명으로 검색 가능하게 구성했습니다.
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="font-semibold text-slate-900">3. 보고/공유용 CSV</p>
-                        <p className="mt-1">
-                          등록일자, 송장번호, 주문번호, 고객명, 반품유형, 제품명, 검사결과, 비고까지 내려받을 수 있습니다.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900">기록 조회</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      제품명, 반품유형, 결과, 고객명, 송장번호, 주문번호, 비고로 검색할 수 있습니다.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={downloadCsv}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-                  >
-                    <Download className="h-4 w-4" />
-                    CSV 내려받기
-                  </button>
+                <div className="space-y-2">
+                  <Label>주문번호</Label>
+                  <Input
+                    value={orderNumber}
+                    onChange={(e) => setOrderNumber(e.target.value)}
+                    placeholder="예: 20260421-0001"
+                    className="rounded-2xl"
+                  />
                 </div>
 
-                <div className="mt-5 grid gap-3 lg:grid-cols-[1.2fr_0.45fr_0.45fr]">
+                <div className="space-y-2">
+                  <Label>고객명</Label>
                   <div className="relative">
-                    <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      value={searchText}
-                      onChange={(e) => setSearchText(e.target.value)}
-                      placeholder="제품명, 반품유형, 결과, 고객명, 송장번호, 주문번호, 비고 검색"
-                      className="w-full rounded-2xl border border-slate-200 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-slate-400"
+                    <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      placeholder="예: 홍길동"
+                      className="rounded-2xl pl-9"
                     />
                   </div>
+                </div>
+              </div>
 
-                  <select
-                    value={filterProduct}
-                    onChange={(e) => setFilterProduct(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>반품유형</Label>
+                  <Select
+                    value={returnType}
+                    onValueChange={(value) => setReturnType(value as ReturnType)}
                   >
-                    <option>전체 제품</option>
-                    {PRODUCT_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={filterResult}
-                    onChange={(e) => setFilterResult(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
-                  >
-                    <option>전체 결과</option>
-                    {RESULT_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="rounded-2xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RETURN_TYPES.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                <div className="mt-5">
-                  {filteredRecords.length === 0 ? (
-                    <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
-                      <p className="text-sm text-slate-500">아직 등록된 기록이 없어요.</p>
-                    </div>
-                  ) : (
-                    <div className="grid gap-4">
-                      {filteredRecords.map((record) => (
-                        <div
-                          key={record.id}
-                          className="rounded-3xl border border-slate-200 bg-white p-5 transition hover:shadow-md"
+                <div className="space-y-2">
+                  <Label>제품명</Label>
+                  <Select
+                    value={productName}
+                    onValueChange={(value) => setProductName(value as ProductType)}
+                  >
+                    <SelectTrigger className="rounded-2xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PRODUCT_TYPES.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>검사결과</Label>
+                  <Select
+                    value={inspectionResult}
+                    onValueChange={(value) =>
+                      setInspectionResult(value as InspectionResult)
+                    }
+                  >
+                    <SelectTrigger className="rounded-2xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RESULT_TYPES.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>비고</Label>
+                <Textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="예: 검사 완료 후 정상화 / 모터 불량으로 불량 판정 / 안성물류 송장 매칭 완료 등"
+                  className="min-h-[120px] rounded-2xl"
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card className="rounded-3xl border-dashed shadow-none">
+                  <CardContent className="p-5">
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-semibold">송장 사진</p>
+                        <p className="text-sm text-slate-500">
+                          최대 {MAX_INVOICE_PHOTOS}장 / 필수 / 자동 압축 업로드
+                        </p>
+                      </div>
+
+                      <label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={handleInvoiceUpload}
+                          disabled={uploadingInvoice}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="rounded-2xl"
+                          asChild
                         >
-                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="space-y-3">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
-                                  {record.productName}
-                                </span>
-                                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                                  {record.returnType}
-                                </span>
-                                <span
-                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                    record.result === "정상화 완료"
-                                      ? "bg-emerald-100 text-emerald-700"
-                                      : record.result === "불량 판정"
-                                        ? "bg-rose-100 text-rose-700"
-                                        : "bg-amber-100 text-amber-700"
-                                  }`}
-                                >
-                                  {record.result}
-                                </span>
-                              </div>
+                          <span>
+                            {uploadingInvoice ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Upload className="mr-2 h-4 w-4" />
+                            )}
+                            업로드
+                          </span>
+                        </Button>
+                      </label>
+                    </div>
 
-                              <div>
-                                <p className="text-sm text-slate-400">
-                                  등록일자: {formatDateTime(record.registeredAt)}
-                                </p>
-                                <p className="mt-1 text-base font-semibold text-slate-900">
-                                  고객명: {record.customerName || "-"}
-                                </p>
-                              </div>
+                    <div className="space-y-3">
+                      {invoicePhotos.length === 0 && (
+                        <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+                          등록된 사진이 없습니다.
+                        </div>
+                      )}
 
-                              <div className="grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                                <p>송장번호: {record.invoiceNumber || "-"}</p>
-                                <p>주문번호: {record.orderNumber || "-"}</p>
-                                <p>송장 사진: {record.invoicePhotos.length}장</p>
-                                <p>제품 사진: {record.productPhotos.length}장</p>
-                              </div>
-
-                              <p className="line-clamp-2 text-sm text-slate-600">
-                                비고: {record.note || "-"}
-                              </p>
+                      {invoicePhotos.map((photo) => (
+                        <div
+                          key={photo.url}
+                          className="overflow-hidden rounded-2xl border bg-white"
+                        >
+                          <img
+                            src={photo.url}
+                            alt={photo.filename}
+                            className="h-40 w-full object-cover"
+                          />
+                          <div className="flex items-center justify-between gap-2 p-3 text-sm">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">{photo.filename}</p>
+                              <p className="text-slate-500">{formatBytes(photo.size)}</p>
                             </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setSelectedRecord(record)}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-                              >
-                                <FileImage className="h-4 w-4" />
-                                상세보기
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => void handleDelete(record.id)}
-                                disabled={deletingId === record.id}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {deletingId === record.id ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    삭제 중...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Trash2 className="h-4 w-4" />
-                                    삭제
-                                  </>
-                                )}
-                              </button>
-                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="rounded-xl"
+                              onClick={() =>
+                                handleRemoveUploadedPhoto(photo, "invoice")
+                              }
+                            >
+                              <Trash2 className="mr-1 h-4 w-4" />
+                              삭제
+                            </Button>
                           </div>
                         </div>
                       ))}
                     </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-3xl border-dashed shadow-none">
+                  <CardContent className="p-5">
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-semibold">제품 사진</p>
+                        <p className="text-sm text-slate-500">
+                          최대 {MAX_PRODUCT_PHOTOS}장 / 선택 / 외관·불량 상태 기록
+                        </p>
+                      </div>
+
+                      <label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={handleProductUpload}
+                          disabled={uploadingProduct}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="rounded-2xl"
+                          asChild
+                        >
+                          <span>
+                            {uploadingProduct ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Upload className="mr-2 h-4 w-4" />
+                            )}
+                            업로드
+                          </span>
+                        </Button>
+                      </label>
+                    </div>
+
+                    <div className="space-y-3">
+                      {productPhotos.length === 0 && (
+                        <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+                          등록된 사진이 없습니다.
+                        </div>
+                      )}
+
+                      {productPhotos.map((photo) => (
+                        <div
+                          key={photo.url}
+                          className="overflow-hidden rounded-2xl border bg-white"
+                        >
+                          <img
+                            src={photo.url}
+                            alt={photo.filename}
+                            className="h-40 w-full object-cover"
+                          />
+                          <div className="flex items-center justify-between gap-2 p-3 text-sm">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">{photo.filename}</p>
+                              <p className="text-slate-500">{formatBytes(photo.size)}</p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="rounded-xl"
+                              onClick={() =>
+                                handleRemoveUploadedPhoto(photo, "product")
+                              }
+                            >
+                              <Trash2 className="mr-1 h-4 w-4" />
+                              삭제
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  type="button"
+                  onClick={handleSaveRecord}
+                  disabled={savingRecord}
+                  className="rounded-2xl"
+                >
+                  {savingRecord ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ClipboardList className="mr-2 h-4 w-4" />
                   )}
+                  기록 저장
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={resetForm}
+                  className="rounded-2xl"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  입력 초기화
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-6">
+            <Card className="rounded-3xl shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-2xl">운영 가이드</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-3xl border bg-slate-50 p-5">
+                  <ol className="space-y-3 text-sm leading-6 text-slate-700">
+                    <li>1. 반품 입고 후 송장 사진 기준으로 먼저 등록합니다.</li>
+                    <li>2. 주문번호, 고객명은 확인 가능한 범위만 입력해도 됩니다.</li>
+                    <li>3. 검사 전에는 ‘검사 대기’로 저장해두고, 판정 후 수정이 필요하면 재등록 기준으로 운영합니다.</li>
+                    <li>4. 제품 사진은 외관, 침수 흔적, 불량 흔적 위주로 남기면 됩니다.</li>
+                    <li>5. 삭제 시 기록과 연결된 사진이 함께 삭제됩니다.</li>
+                  </ol>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-2xl">실사용 기준 요약</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-3xl border bg-slate-50 p-5">
+                  <div className="mb-2 flex items-center gap-2 text-base font-semibold">
+                    <Smartphone className="h-5 w-5" />
+                    PC/휴대폰 동시 조회
+                  </div>
+                  <p className="text-sm leading-6 text-slate-700">
+                    브라우저 로컬 저장이 아니라 서버 저장 방식이라서,
+                    사무실 PC에서 등록한 기록을 휴대폰에서도 그대로 확인할 수 있습니다.
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border bg-slate-50 p-5">
+                  <div className="mb-2 flex items-center gap-2 text-base font-semibold">
+                    <Camera className="h-5 w-5" />
+                    사진 용량 낭비 최소화
+                  </div>
+                  <p className="text-sm leading-6 text-slate-700">
+                    업로드 전에 자동 압축 처리되고, 송장 2장 / 제품 4장 제한을 둬서
+                    저장공간이 불필요하게 빠르게 차지 않도록 구성했습니다.
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border bg-slate-50 p-5">
+                  <div className="mb-2 flex items-center gap-2 text-base font-semibold">
+                    <Search className="h-5 w-5" />
+                    검색 실사용성 강화
+                  </div>
+                  <p className="text-sm leading-6 text-slate-700">
+                    송장번호, 주문번호, 고객명, 반품유형, 제품명, 검사결과, 비고까지 한 번에 검색되므로
+                    나중에 역추적하거나 공유할 때 찾기 편합니다.
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border bg-slate-50 p-5">
+                  <div className="mb-2 flex items-center gap-2 text-base font-semibold">
+                    <FileText className="h-5 w-5" />
+                    보고용 CSV 바로 추출
+                  </div>
+                  <p className="text-sm leading-6 text-slate-700">
+                    등록일자, 송장번호, 주문번호, 고객명, 반품유형, 제품명,
+                    검사결과, 비고 항목으로 내려받을 수 있게 맞춰두었습니다.
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border bg-amber-50 p-5">
+                  <div className="mb-2 flex items-center gap-2 text-base font-semibold text-amber-900">
+                    <AlertTriangle className="h-5 w-5" />
+                    추천 운영 방식
+                  </div>
+                  <p className="text-sm leading-6 text-amber-900">
+                    검사 전 입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 CSV 공유
+                    흐름으로 쓰는 게 가장 실무에 맞습니다.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        <Card className="mt-6 rounded-3xl shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-2xl">기록 조회</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-[1.5fr_0.8fr_0.8fr_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="송장번호, 주문번호, 고객명, 반품유형, 제품명, 결과, 비고 검색"
+                  className="rounded-2xl pl-9"
+                />
+              </div>
+
+              <Select value={filterProduct} onValueChange={setFilterProduct}>
+                <SelectTrigger className="rounded-2xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="전체">전체 제품</SelectItem>
+                  {PRODUCT_TYPES.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterResult} onValueChange={setFilterResult}>
+                <SelectTrigger className="rounded-2xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="전체">전체 결과</SelectItem>
+                  {RESULT_TYPES.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button variant="outline" className="rounded-2xl" onClick={fetchRecords}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                새로고침
+              </Button>
+            </div>
+
+            {loadingRecords ? (
+              <div className="flex items-center justify-center rounded-3xl border border-dashed p-10 text-slate-500">
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                기록 불러오는 중...
+              </div>
+            ) : filteredRecords.length === 0 ? (
+              <div className="rounded-3xl border border-dashed p-10 text-center text-slate-500">
+                아직 등록된 기록이 없어요.
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {filteredRecords.map((record) => (
+                  <Card key={record.id} className="rounded-3xl border shadow-none">
+                    <CardContent className="p-5">
+                      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                              {record.productName}
+                            </span>
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                              {record.returnType}
+                            </span>
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                              {record.inspectionResult}
+                            </span>
+                          </div>
+                          <p className="mt-3 text-sm text-slate-500">
+                            등록일자: {formatDateTime(record.createdAt)}
+                          </p>
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          className="rounded-2xl"
+                          onClick={() => handleDeleteRecord(record)}
+                          disabled={deletingId === record.id}
+                        >
+                          {deletingId === record.id ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              삭제 중...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              삭제
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl bg-slate-50 p-4">
+                          <p className="text-xs text-slate-500">송장번호</p>
+                          <p className="mt-1 font-medium">
+                            {record.invoiceNumber || "-"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-slate-50 p-4">
+                          <p className="text-xs text-slate-500">주문번호</p>
+                          <p className="mt-1 font-medium">
+                            {record.orderNumber || "-"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-slate-50 p-4">
+                          <p className="text-xs text-slate-500">고객명</p>
+                          <p className="mt-1 font-medium">
+                            {record.customerName || "-"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-slate-50 p-4">
+                          <p className="text-xs text-slate-500">사진 수</p>
+                          <p className="mt-1 font-medium">
+                            송장 {record.invoicePhotos.length}장 / 제품{" "}
+                            {record.productPhotos.length}장
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                        <p className="text-xs text-slate-500">비고</p>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {record.note || "-"}
+                        </p>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                        <div>
+                          <p className="mb-2 font-medium">송장 사진</p>
+                          {record.invoicePhotos.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+                              등록된 사진이 없습니다.
+                            </div>
+                          ) : (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {record.invoicePhotos.map((photo) => (
+                                <a
+                                  key={photo.url}
+                                  href={photo.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="overflow-hidden rounded-2xl border bg-white"
+                                >
+                                  <img
+                                    src={photo.url}
+                                    alt={photo.filename}
+                                    className="h-40 w-full object-cover"
+                                  />
+                                  <div className="p-3 text-sm">
+                                    <p className="truncate font-medium">
+                                      {photo.filename}
+                                    </p>
+                                    <p className="text-slate-500">
+                                      {formatBytes(photo.size)}
+                                    </p>
+                                  </div>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="mb-2 font-medium">제품 사진</p>
+                          {record.productPhotos.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+                              등록된 사진이 없습니다.
+                            </div>
+                          ) : (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {record.productPhotos.map((photo) => (
+                                <a
+                                  key={photo.url}
+                                  href={photo.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="overflow-hidden rounded-2xl border bg-white"
+                                >
+                                  <img
+                                    src={photo.url}
+                                    alt={photo.filename}
+                                    className="h-40 w-full object-cover"
+                                  />
+                                  <div className="p-3 text-sm">
+                                    <p className="truncate font-medium">
+                                      {photo.filename}
+                                    </p>
+                                    <p className="text-slate-500">
+                                      {formatBytes(photo.size)}
+                                    </p>
+                                  </div>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             )}
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
-
-      {selectedRecord ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
-          <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-[32px] bg-white p-6 shadow-2xl">
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-2xl font-bold text-slate-900">
-                  {selectedRecord.productName} / {selectedRecord.returnType}
-                </h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  등록일자: {formatDateTime(selectedRecord.registeredAt)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedRecord(null)}
-                className="rounded-2xl border border-slate-200 p-2 text-slate-600 transition hover:bg-slate-100"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm text-slate-500">검사결과</p>
-                <p className="mt-2 text-lg font-bold text-slate-900">
-                  {selectedRecord.result}
-                </p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm text-slate-500">송장번호</p>
-                <p className="mt-2 text-lg font-bold text-slate-900">
-                  {selectedRecord.invoiceNumber || "-"}
-                </p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm text-slate-500">주문번호</p>
-                <p className="mt-2 text-lg font-bold text-slate-900">
-                  {selectedRecord.orderNumber || "-"}
-                </p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm text-slate-500">고객명</p>
-                <p className="mt-2 text-lg font-bold text-slate-900">
-                  {selectedRecord.customerName || "-"}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-semibold text-slate-700">비고</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                {selectedRecord.note || "-"}
-              </p>
-            </div>
-
-            <div className="mt-6 grid gap-6 lg:grid-cols-2">
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <Camera className="h-4 w-4 text-slate-500" />
-                  <h4 className="font-bold text-slate-900">
-                    송장 사진 ({selectedRecord.invoicePhotos.length}장)
-                  </h4>
-                </div>
-                <PhotoGrid photos={selectedRecord.invoicePhotos} title="송장 사진" />
-              </div>
-
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <ImageIcon className="h-4 w-4 text-slate-500" />
-                  <h4 className="font-bold text-slate-900">
-                    제품 사진 ({selectedRecord.productPhotos.length}장)
-                  </h4>
-                </div>
-                <PhotoGrid photos={selectedRecord.productPhotos} title="제품 사진" />
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

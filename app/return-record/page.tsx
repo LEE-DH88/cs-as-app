@@ -73,6 +73,15 @@ type ReturnRecord = {
   productPhotos: UploadedPhoto[];
 };
 
+type OcrParsedResult = {
+  invoiceNumber?: string;
+  orderNumber?: string;
+  customerName?: string;
+  returnType?: string;
+  productName?: string;
+  rawText?: string;
+};
+
 const RETURN_TYPES: ReturnType[] = [
   "일반반품",
   "변심반품",
@@ -254,6 +263,9 @@ export default function ReturnRecordApp() {
 
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [statusError, setStatusError] = useState<string>("");
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrMessage, setOcrMessage] = useState<string>("");
+  const [ocrRawText, setOcrRawText] = useState<string>("");
 
   async function fetchRecords() {
     try {
@@ -343,6 +355,68 @@ export default function ReturnRecordApp() {
     setProductPhotos([]);
     setStatusMessage("");
     setStatusError("");
+    setOcrMessage("");
+    setOcrRawText("");
+  }
+
+  function applyOcrResult(parsed: OcrParsedResult) {
+    if (parsed.invoiceNumber) setInvoiceNumber(parsed.invoiceNumber);
+    if (parsed.orderNumber) setOrderNumber(parsed.orderNumber);
+    if (parsed.customerName) setCustomerName(parsed.customerName);
+
+    if (
+      parsed.returnType &&
+      RETURN_TYPES.includes(parsed.returnType as ReturnType)
+    ) {
+      setReturnType(parsed.returnType as ReturnType);
+    }
+
+    if (
+      parsed.productName &&
+      PRODUCT_TYPES.includes(parsed.productName as ProductType)
+    ) {
+      setProductName(parsed.productName as ProductType);
+    }
+
+    setOcrRawText(parsed.rawText || "");
+  }
+
+  async function runInvoiceOcr(file: File) {
+    try {
+      setOcrLoading(true);
+      setOcrMessage("송장 자동분석 중입니다...");
+      setStatusError("");
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/ocr-invoice", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "송장 자동분석에 실패했습니다.");
+      }
+
+      if (data?.parsed) {
+        applyOcrResult(data.parsed as OcrParsedResult);
+        setOcrMessage("송장 자동분석이 완료되었습니다.");
+      } else {
+        setOcrMessage("글자는 읽었지만 자동분석 결과가 없습니다.");
+      }
+    } catch (error) {
+      setOcrMessage("");
+      setStatusError(
+        error instanceof Error
+          ? error.message
+          : "송장 자동분석 중 오류가 발생했습니다."
+      );
+    } finally {
+      setOcrLoading(false);
+    }
   }
 
   async function handleInvoiceUpload(
@@ -369,12 +443,17 @@ export default function ReturnRecordApp() {
       setStatusError("");
       setStatusMessage("송장 사진 업로드 중입니다...");
 
+      const firstImage = files.find((file) => file.type.startsWith("image/"));
+      if (firstImage) {
+        await runInvoiceOcr(firstImage);
+      }
+
       const uploaded = await Promise.all(
         files.map((file) => uploadSingleFile(file, "invoice"))
       );
 
       setInvoicePhotos((prev) => [...prev, ...uploaded]);
-      setStatusMessage("송장 사진 업로드가 완료되었습니다.");
+      setStatusMessage("송장 사진 업로드와 자동분석이 완료되었습니다.");
     } catch (error) {
       setStatusError(
         error instanceof Error ? error.message : "송장 사진 업로드 중 오류가 발생했습니다."
@@ -859,6 +938,32 @@ export default function ReturnRecordApp() {
                         </Button>
                       </label>
                     </div>
+
+                    {ocrLoading && (
+                      <div className="mb-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          송장 사진을 읽어서 송장번호 / 주문번호 / 고객명 / 반품유형 / 제품명을 자동분석 중입니다.
+                        </div>
+                      </div>
+                    )}
+
+                    {!ocrLoading && ocrMessage && (
+                      <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        {ocrMessage}
+                      </div>
+                    )}
+
+                    {ocrRawText && (
+                      <details className="mb-3 rounded-2xl border bg-slate-50 px-4 py-3">
+                        <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                          OCR이 읽은 원문 보기
+                        </summary>
+                        <p className="mt-3 whitespace-pre-wrap break-all text-xs leading-6 text-slate-500">
+                          {ocrRawText}
+                        </p>
+                      </details>
+                    )}
 
                     <div className="space-y-3">
                       {invoicePhotos.length === 0 && (

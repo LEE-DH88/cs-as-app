@@ -270,7 +270,7 @@ async function uploadImages(
   return uploaded;
 }
 
-export default function ReturnRecordApp(): JSX.Element {
+export default function ReturnRecordApp() {
   const [records, setRecords] = useState<ReturnRecord[]>([]);
   const [activeTab, setActiveTab] = useState<"register" | "records">("register");
 

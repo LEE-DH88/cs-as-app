@@ -17,10 +17,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     const pathname = `ggumbi-return-record/${folder}/${Date.now()}-${file.name}`;
 
     const blob = await put(pathname, file, {
-      access: "public"
-      addRandomSuffix: true,
-      contentType: file.type || "image/jpeg",
-    });
+  access: "public",
+  addRandomSuffix: true,
+  contentType: file.type || "image/jpeg",
+});
 
     return NextResponse.json(blob);
   } catch (error) {

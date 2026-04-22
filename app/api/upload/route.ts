@@ -10,23 +10,26 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!file) {
       return NextResponse.json(
         { error: "파일이 없습니다." },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
     const pathname = `ggumbi-return-record/${folder}/${Date.now()}-${file.name}`;
 
     const blob = await put(pathname, file, {
-  access: "public",
-  addRandomSuffix: true,
-  contentType: file.type || "image/jpeg",
-});
+      access: "public",
+      addRandomSuffix: true,
+      contentType: file.type || "image/jpeg",
+    });
 
     return NextResponse.json(blob);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "업로드 실패" },
-      { status: 500 },
+      {
+        error:
+          error instanceof Error ? error.message : "업로드 실패",
+      },
+      { status: 500 }
     );
   }
 }

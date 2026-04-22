@@ -335,44 +335,9 @@ export default function ReturnRecordApp() {
     resetForm();
   };
 
-  const handleDelete = async (id: string): Promise<void> => {
-  const target = records.find((r) => r.id === id);
-  if (!target) return;
-
-  const ok = window.confirm("이 기록을 삭제할까요?\n연결된 사진도 함께 삭제됩니다.");
-  if (!ok) return;
-
-  try {
-    setDeletingId(id);
-
-    const urls = [
-      ...target.invoicePhotos.map((p) => p.url),
-      ...target.productPhotos.map((p) => p.url),
-    ].filter(Boolean);
-
-    if (urls.length) {
-      const response = await fetch("/api/delete-blob", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ urls }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "사진 삭제 실패");
-      }
-    }
-
+  const handleDelete = (id: string): void => {
     setRecords((prev) => prev.filter((r) => r.id !== id));
-  } catch (error) {
-    console.error(error);
-    alert("기록 삭제 중 오류가 발생했습니다.");
-  } finally {
-    setDeletingId(null);
-  }
-};
+  };
 
   const handleInvoiceUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -899,7 +864,7 @@ export default function ReturnRecordApp() {
                                   </DialogContent>
                                 </Dialog>
 
-<Button
+ <Button
   variant="outline"
   className="rounded-2xl"
   onClick={() => handleDelete(record.id)}
@@ -917,6 +882,13 @@ export default function ReturnRecordApp() {
     </>
   )}
 </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </motion.div>
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>

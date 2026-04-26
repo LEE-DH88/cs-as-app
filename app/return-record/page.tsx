@@ -6,7 +6,6 @@ import {
   ClipboardList,
   Download,
   Loader2,
-  Package,
   RefreshCw,
   Search,
   Trash2,
@@ -74,6 +73,7 @@ type ReturnRecord = {
 };
 
 type OcrParsedResult = {
+  trackingNumber?: string;
   invoiceNumber?: string;
   orderNumber?: string;
   customerName?: string;
@@ -360,7 +360,9 @@ export default function ReturnRecordApp() {
   }
 
   function applyOcrResult(parsed: OcrParsedResult) {
-    if (parsed.invoiceNumber) setInvoiceNumber(parsed.invoiceNumber);
+    const detectedInvoiceNumber = parsed.trackingNumber || parsed.invoiceNumber;
+
+    if (detectedInvoiceNumber) setInvoiceNumber(detectedInvoiceNumber);
     if (parsed.orderNumber) setOrderNumber(parsed.orderNumber);
     if (parsed.customerName) setCustomerName(parsed.customerName);
 
@@ -390,15 +392,15 @@ export default function ReturnRecordApp() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("/api/ocr-invoice", {
+      const response = await fetch("/api/parse-invoice", {
         method: "POST",
         body: formData,
       });
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data?.error || "송장 자동분석에 실패했습니다.");
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || data?.error || "송장 자동분석에 실패했습니다.");
       }
 
       if (data?.parsed) {
@@ -801,7 +803,7 @@ export default function ReturnRecordApp() {
                   <Input
                     value={invoiceNumber}
                     onChange={(e) => setInvoiceNumber(e.target.value)}
-                    placeholder="예: 1234567890"
+                    placeholder="예: 5737-0812-3995"
                     className="rounded-2xl"
                   />
                 </div>
@@ -912,32 +914,54 @@ export default function ReturnRecordApp() {
                         </p>
                       </div>
 
-                      <label>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          className="hidden"
-                          onChange={handleInvoiceUpload}
-                          disabled={uploadingInvoice}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="rounded-2xl"
-                          asChild
-                        >
-                          <span>
-                            {uploadingInvoice ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Upload className="mr-2 h-4 w-4" />
-                            )}
-                            업로드
-                          </span>
-                        </Button>
-                      </label>
-                    </div>
+<div className="flex flex-wrap gap-2">
+  <input
+    id="invoice-camera-input"
+    type="file"
+    accept="image/*"
+    capture="environment"
+    className="hidden"
+    onChange={handleInvoiceUpload}
+    disabled={uploadingInvoice}
+  />
+
+  <input
+    id="invoice-gallery-input"
+    type="file"
+    accept="image/*"
+    multiple
+    className="hidden"
+    onChange={handleInvoiceUpload}
+    disabled={uploadingInvoice}
+  />
+
+  <Button
+    type="button"
+    variant="outline"
+    className="rounded-2xl"
+    onClick={() => document.getElementById("invoice-camera-input")?.click()}
+    disabled={uploadingInvoice}
+  >
+    {uploadingInvoice ? (
+      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+    ) : (
+      <Camera className="mr-2 h-4 w-4" />
+    )}
+    카메라 촬영
+  </Button>
+
+  <Button
+    type="button"
+    variant="outline"
+    className="rounded-2xl"
+    onClick={() => document.getElementById("invoice-gallery-input")?.click()}
+    disabled={uploadingInvoice}
+  >
+    <Upload className="mr-2 h-4 w-4" />
+    사진첩 선택
+  </Button>
+</div>
+</div>
 
                     {ocrLoading && (
                       <div className="mb-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
@@ -1016,33 +1040,54 @@ export default function ReturnRecordApp() {
                         </p>
                       </div>
 
-                      <label>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          className="hidden"
-                          onChange={handleProductUpload}
-                          disabled={uploadingProduct}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="rounded-2xl"
-                          asChild
-                        >
-                          <span>
-                            {uploadingProduct ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Upload className="mr-2 h-4 w-4" />
-                            )}
-                            업로드
-                          </span>
-                        </Button>
-                      </label>
-                    </div>
+<div className="flex flex-wrap gap-2">
+  <input
+    id="product-camera-input"
+    type="file"
+    accept="image/*"
+    capture="environment"
+    className="hidden"
+    onChange={handleProductUpload}
+    disabled={uploadingProduct}
+  />
 
+  <input
+    id="product-gallery-input"
+    type="file"
+    accept="image/*"
+    multiple
+    className="hidden"
+    onChange={handleProductUpload}
+    disabled={uploadingProduct}
+  />
+
+  <Button
+    type="button"
+    variant="outline"
+    className="rounded-2xl"
+    onClick={() => document.getElementById("product-camera-input")?.click()}
+    disabled={uploadingProduct}
+  >
+    {uploadingProduct ? (
+      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+    ) : (
+      <Camera className="mr-2 h-4 w-4" />
+    )}
+    카메라 촬영
+  </Button>
+
+  <Button
+    type="button"
+    variant="outline"
+    className="rounded-2xl"
+    onClick={() => document.getElementById("product-gallery-input")?.click()}
+    disabled={uploadingProduct}
+  >
+    <Upload className="mr-2 h-4 w-4" />
+    사진첩 선택
+  </Button>
+</div>
+</div>
                     <div className="space-y-3">
                       {productPhotos.length === 0 && (
                         <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
@@ -1371,6 +1416,7 @@ export default function ReturnRecordApp() {
                             </div>
                           )}
                         </div>
+
 
                         <div>
                           <p className="mb-2 font-medium">제품 사진</p>

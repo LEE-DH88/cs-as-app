@@ -134,23 +134,29 @@ function downloadCsv(filename: string, rows: string[][]) {
         .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
         .join(",")
     )
-    .join("\n");
+    .join("\r\n");
 
-const blob = new Blob(["\uFEFF" + csvContent], {
-  type: "text/csv;charset=utf-8;",
-});
+  const blob = new Blob(["\uFEFF" + csvContent], {
+    type: "text/csv;charset=utf-8;",
+  });
 
-  const url = URL.createObjectURL(blob);
+  const url = window.URL.createObjectURL(blob);
+
   const link = document.createElement("a");
-
   link.href = url;
   link.download = filename;
+  link.style.display = "none";
 
   document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
 
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    link.click();
+
+    setTimeout(() => {
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    }, 100);
+  }, 0);
 }
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
@@ -690,6 +696,15 @@ export default function ReturnRecordApp() {
   }
 
   function handleDownloadCsv() {
+    if (filteredRecords.length === 0) {
+      setStatusError("내려받을 기록이 없습니다.");
+      setStatusMessage("");
+      return;
+    }
+
+    setStatusError("");
+    setStatusMessage("CSV 파일을 내려받는 중입니다.");
+
     const rows: string[][] = [
       [
         "등록일자",

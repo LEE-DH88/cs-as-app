@@ -134,25 +134,25 @@ function downloadCsv(filename: string, rows: string[][]) {
     )
     .join("\n");
 
-  const blob = new Blob(["\ufeff" + csv], {
-    type: "text/csv;charset=utf-8;",
-  });
+  const csvContent = "\ufeff" + csv;
+  const encoded = encodeURIComponent(csvContent);
 
-  const url = URL.createObjectURL(blob);
+  const dataUrl = `data:text/csv;charset=utf-8,${encoded}`;
 
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   if (isMobile) {
-    window.open(url, "_blank");
-  } else {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    window.location.href = dataUrl;
+    return;
   }
 
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 function loadImageElement(src: string): Promise<HTMLImageElement> {

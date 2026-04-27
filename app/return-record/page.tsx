@@ -1207,7 +1207,7 @@ export default function ReturnRecordApp() {
                   >
                     수정 취소
                   </Button>
-                )
+                )}
               </div>
             </CardContent>
           </Card>

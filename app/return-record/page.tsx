@@ -1447,78 +1447,68 @@ export default function ReturnRecordApp() {
                       </div>
 
                       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                        <div>
-                          <p className="mb-2 font-medium">송장 사진</p>
-                          {record.invoicePhotos.length === 0 ? (
-                            <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
-                              등록된 사진이 없습니다.
-                            </div>
-                          ) : (
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              {record.invoicePhotos.map((photo) => (
-                                <a
-                                  key={photo.url}
-                                  href={photo.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="overflow-hidden rounded-2xl border bg-white"
-                                >
-                                  <img
-                                    src={photo.url}
-                                    alt={photo.filename}
-                                    className="h-40 w-full object-cover"
-                                  />
-                                  <div className="p-3 text-sm">
-                                    <p className="truncate font-medium">
-                                      {photo.filename}
-                                    </p>
-                                    <p className="text-slate-500">
-                                      {formatBytes(photo.size)}
-                                    </p>
-                                  </div>
-                                </a>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+  <div>
+    <p className="mb-2 font-medium">송장 사진</p>
+    {record.invoicePhotos.length === 0 ? (
+      <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+        등록된 사진이 없습니다.
+      </div>
+    ) : (
+      <div className="grid gap-3 sm:grid-cols-2">
+        {record.invoicePhotos.map((photo) => (
+          <a
+            key={photo.url}
+            href={photo.url}
+            target="_blank"
+            rel="noreferrer"
+            className="overflow-hidden rounded-2xl border bg-white"
+          >
+            <img
+              src={photo.url}
+              alt={photo.filename}
+              className="h-40 w-full object-cover"
+            />
+            <div className="p-3 text-sm">
+              <p className="truncate font-medium">{photo.filename}</p>
+              <p className="text-slate-500">{formatBytes(photo.size)}</p>
+            </div>
+          </a>
+        ))}
+      </div>
+    )}
+  </div>
 
+  <div>
+    <p className="mb-2 font-medium">제품 사진</p>
+    {record.productPhotos.length === 0 ? (
+      <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+        등록된 사진이 없습니다.
+      </div>
+    ) : (
+      <div className="grid gap-3 sm:grid-cols-2">
+        {record.productPhotos.map((photo) => (
+          <a
+            key={photo.url}
+            href={photo.url}
+            target="_blank"
+            rel="noreferrer"
+            className="overflow-hidden rounded-2xl border bg-white"
+          >
+            <img
+              src={photo.url}
+              alt={photo.filename}
+              className="h-40 w-full object-cover"
+            />
+            <div className="p-3 text-sm">
+              <p className="truncate font-medium">{photo.filename}</p>
+              <p className="text-slate-500">{formatBytes(photo.size)}</p>
+            </div>
+          </a>
+        ))}
+      </div>
+    )}
+  </div>
 </div>
-
-                        <div>
-                          <p className="mb-2 font-medium">제품 사진</p>
-                          {record.productPhotos.length === 0 ? (
-                            <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
-                              등록된 사진이 없습니다.
-                            </div>
-                          ) : (
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              {record.productPhotos.map((photo) => (
-                                <a
-                                  key={photo.url}
-                                  href={photo.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="overflow-hidden rounded-2xl border bg-white"
-                                >
-                                  <img
-                                    src={photo.url}
-                                    alt={photo.filename}
-                                    className="h-40 w-full object-cover"
-                                  />
-                                  <div className="p-3 text-sm">
-                                    <p className="truncate font-medium">
-                                      {photo.filename}
-                                    </p>
-                                    <p className="text-slate-500">
-                                      {formatBytes(photo.size)}
-                                    </p>
-                                  </div>
-                                </a>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
                     </CardContent>
                   </Card>
                 ))}

@@ -145,18 +145,16 @@ function downloadCsv(filename: string, rows: string[][]) {
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  link.rel = "noopener";
   link.style.display = "none";
 
   document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 
   setTimeout(() => {
-    link.click();
-
-    setTimeout(() => {
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    }, 100);
-  }, 0);
+    window.URL.revokeObjectURL(url);
+  }, 1000);
 }
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {

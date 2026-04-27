@@ -1003,7 +1003,7 @@ export default function ReturnRecordApp() {
     사진첩 선택
   </Button>
 </div>
-
+</div>
 
                     {ocrLoading && (
                       <div className="mb-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
@@ -1128,6 +1128,7 @@ export default function ReturnRecordApp() {
     <Upload className="mr-2 h-4 w-4" />
     사진첩 선택
   </Button>
+</div>
 </div>
 
                     <div className="space-y-3">

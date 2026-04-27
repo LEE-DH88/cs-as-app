@@ -130,23 +130,31 @@ function formatBytes(bytes: number) {
 function downloadCsv(filename: string, rows: string[][]) {
   const csv = rows
     .map((row) =>
-      row
-        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
-        .join(",")
+      row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")
     )
     .join("\n");
 
   const blob = new Blob(["\ufeff" + csv], {
     type: "text/csv;charset=utf-8;",
   });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
+  const url = URL.createObjectURL(blob);
+
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  if (isMobile) {
+    window.open(url, "_blank");
+  } else {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
 function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();

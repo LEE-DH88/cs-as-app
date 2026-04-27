@@ -241,6 +241,8 @@ export default function ReturnRecordApp() {
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [savingRecord, setSavingRecord] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [editingCreatedAt, setEditingCreatedAt] = useState<string | null>(null);
 
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
@@ -357,6 +359,8 @@ export default function ReturnRecordApp() {
     setStatusError("");
     setOcrMessage("");
     setOcrRawText("");
+    setEditingRecordId(null);
+    setEditingCreatedAt(null);
   }
 
   function applyOcrResult(parsed: OcrParsedResult) {
@@ -547,6 +551,34 @@ export default function ReturnRecordApp() {
     }
   }
 
+  function handleEditRecord(record: ReturnRecord) {
+    setEditingRecordId(record.id);
+    setEditingCreatedAt(record.createdAt);
+
+    setInvoiceNumber(record.invoiceNumber || "");
+    setOrderNumber(record.orderNumber || "");
+    setCustomerName(record.customerName || "");
+    setReturnType(record.returnType);
+    setProductName(record.productName);
+    setInspectionResult(record.inspectionResult);
+    setNote(record.note || "");
+    setInvoicePhotos(record.invoicePhotos || []);
+    setProductPhotos(record.productPhotos || []);
+
+    setStatusMessage("수정할 기록을 불러왔습니다. 내용 수정 후 수정 저장을 눌러주세요.");
+    setStatusError("");
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  function cancelEdit() {
+    resetForm();
+    setStatusMessage("수정을 취소했습니다.");
+  }
+
   async function handleSaveRecord() {
     if (!invoicePhotos.length) {
       setStatusError("송장 사진은 최소 1장 이상 등록해주세요.");
@@ -558,9 +590,11 @@ export default function ReturnRecordApp() {
       return;
     }
 
+    const isEditing = Boolean(editingRecordId);
+
     const newRecord: ReturnRecord = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
+      id: editingRecordId || crypto.randomUUID(),
+      createdAt: editingCreatedAt || new Date().toISOString(),
       invoiceNumber: invoiceNumber.trim(),
       orderNumber: orderNumber.trim(),
       customerName: customerName.trim(),
@@ -593,7 +627,11 @@ export default function ReturnRecordApp() {
 
       await fetchRecords();
       resetForm();
-      setStatusMessage("기록이 서버에 저장되었습니다. PC와 휴대폰에서 동일하게 조회됩니다.");
+      setStatusMessage(
+        isEditing
+          ? "기록이 수정되었습니다."
+          : "기록이 서버에 저장되었습니다. PC와 휴대폰에서 동일하게 조회됩니다."
+      );
     } catch (error) {
       setStatusError(
         error instanceof Error ? error.message : "기록 저장 중 오류가 발생했습니다."
@@ -790,9 +828,13 @@ export default function ReturnRecordApp() {
         <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
           <Card className="rounded-3xl shadow-sm">
             <CardHeader>
-              <CardTitle className="text-2xl">새 기록 등록</CardTitle>
+              <CardTitle className="text-2xl">
+                {editingRecordId ? "기록 수정" : "새 기록 등록"}
+              </CardTitle>
               <p className="text-sm text-slate-500">
-                사진은 업로드 전 자동 압축되어 저장공간 사용량을 줄입니다.
+                {editingRecordId
+                  ? "기존 기록을 수정 중입니다. 변경 후 수정 저장을 눌러주세요."
+                  : "사진은 업로드 전 자동 압축되어 저장공간 사용량을 줄입니다."}
               </p>
             </CardHeader>
 
@@ -961,7 +1003,7 @@ export default function ReturnRecordApp() {
     사진첩 선택
   </Button>
 </div>
-</div>
+
 
                     {ocrLoading && (
                       <div className="mb-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
@@ -1087,7 +1129,7 @@ export default function ReturnRecordApp() {
     사진첩 선택
   </Button>
 </div>
-</div>
+
                     <div className="space-y-3">
                       {productPhotos.length === 0 && (
                         <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
@@ -1142,7 +1184,7 @@ export default function ReturnRecordApp() {
                   ) : (
                     <ClipboardList className="mr-2 h-4 w-4" />
                   )}
-                  기록 저장
+                  {editingRecordId ? "수정 저장" : "기록 저장"}
                 </Button>
 
                 <Button
@@ -1154,6 +1196,17 @@ export default function ReturnRecordApp() {
                   <RefreshCw className="mr-2 h-4 w-4" />
                   입력 초기화
                 </Button>
+
+                {editingRecordId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={cancelEdit}
+                    className="rounded-2xl"
+                  >
+                    수정 취소
+                  </Button>
+                )
               </div>
             </CardContent>
           </Card>
@@ -1322,6 +1375,16 @@ export default function ReturnRecordApp() {
                           </p>
                         </div>
 
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-2xl"
+                            onClick={() => handleEditRecord(record)}
+                          >
+                            수정
+                          </Button>
+
                         <Button
                           type="button"
                           variant="destructive"
@@ -1341,6 +1404,7 @@ export default function ReturnRecordApp() {
                             </>
                           )}
                         </Button>
+                        </div>
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1417,6 +1481,7 @@ export default function ReturnRecordApp() {
                           )}
                         </div>
 
+</div>
 
                         <div>
                           <p className="mb-2 font-medium">제품 사진</p>

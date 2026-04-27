@@ -113,11 +113,12 @@ export async function POST(request: Request) {
 
     const pathname = `${RECORDS_PREFIX}${body.id}.json`;
 
-    await put(pathname, JSON.stringify(body, null, 2), {
-      access: "public",
-      addRandomSuffix: false,
-      contentType: "application/json; charset=utf-8",
-    });
+await put(pathname, JSON.stringify(body, null, 2), {
+  access: "public",
+  addRandomSuffix: false,
+  allowOverwrite: true,
+  contentType: "application/json; charset=utf-8",
+});
 
     return NextResponse.json({ success: true });
   } catch (error) {

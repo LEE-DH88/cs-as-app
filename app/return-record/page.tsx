@@ -128,23 +128,31 @@ function formatBytes(bytes: number) {
 }
 
 function downloadCsv(filename: string, rows: string[][]) {
-  const csv = rows
+  const csvContent = rows
     .map((row) =>
-      row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")
+      row
+        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+        .join(",")
     )
     .join("\n");
 
-  const csvContent = "\ufeff" + csv;
-  const encoded = encodeURIComponent(csvContent);
-  const dataUrl = `data:text/csv;charset=utf-8,${encoded}`;
+const blob = new Blob(["\uFEFF" + csvContent], {
+  type: "text/csv;charset=utf-8;",
+});
 
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  URL.revokeObjectURL(url);
 }
+
 function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();

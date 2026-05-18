@@ -41,6 +41,7 @@ type ReturnType =
 
 type ProductType =
   | "휴대용분유포트"
+  | "(분리형) 휴대용분유포트"
   | "분유쉐이커"
   | "LED분유쉐이커";
 
@@ -91,6 +92,7 @@ const RETURN_TYPES: ReturnType[] = [
 
 const PRODUCT_TYPES: ProductType[] = [
   "휴대용분유포트",
+  "(분리형) 휴대용분유포트",
   "분유쉐이커",
   "LED분유쉐이커",
 ];
@@ -727,7 +729,7 @@ export default function ReturnRecordApp() {
     ];
 
     const today = new Date();
-    const filename = `3종반품기록_${today.getFullYear()}${String(
+    const filename = `반품검사기록_${today.getFullYear()}${String(
       today.getMonth() + 1
     ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.csv`;
 
@@ -741,10 +743,10 @@ export default function ReturnRecordApp() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-                3종 반품 검사/수리 기록 프로그램
+                반품 검사/수리 기록 프로그램
               </h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                대상: 휴대용분유포트 · 분유쉐이커 · LED분유쉐이커 / 일반반품 ·
+                대상: 휴대용분유포트 · (분리형) 휴대용분유포트 · 분유쉐이커 · LED분유쉐이커 / 일반반품 ·
                 변심반품 · 불량반품 · 불량교환
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-500">

@@ -66,6 +66,7 @@ function extractReturnMemo(text: string) {
   // ★변심반품 링크맘 엄감★2026041325853071
   // ★일반반품 링크맘 엄감★20260123-0002995 / 휴대용분유포트
   // ★일반반품 링크맘 엄감★20260123-0002995 / (분리형) 휴대용분유포트
+  // ★불량반품★20260123-0002995 / 휴대용분유포트 / 증상
   const starMemoMatch = text.match(
     /★[^★]*(일반반품|변심반품|불량반품|불량교환|AS|검수)[^★]*★\s*[0-9A-Za-z가-힣\-_/() ]{5,}/
   );
@@ -100,21 +101,67 @@ function extractReturnType(text: string) {
 }
 
 function extractOrderNumber(text: string, memo: string) {
-  const target = memo || text;
+  const targets = [memo, text].filter(Boolean);
 
-  // 배송메모 뒤 주문번호 우선 추출
+  for (const target of targets) {
+    const found = findOrderNumberInText(target);
+    if (found) return found;
+  }
+
+  // OCR에서 숫자 사이에 공백이 들어간 경우 대비
+  const compactText = text.replace(/\s+/g, "");
+  const compactMemo = memo.replace(/\s+/g, "");
+
+  const compactTargets = [compactMemo, compactText].filter(Boolean);
+
+  for (const target of compactTargets) {
+    const found = findOrderNumberInText(target);
+    if (found) return found;
+  }
+
+  return "";
+}
+
+function findOrderNumberInText(target: string) {
+  // 1순위: "주문번호"라는 글자가 직접 있는 경우
+  const labeledOrderMatch =
+    target.match(/주문\s*번호[:\s]*([0-9]{8,}(?:-[0-9]+)?)/) ||
+    target.match(/주문[:\s]*([0-9]{8,}(?:-[0-9]+)?)/);
+
+  if (labeledOrderMatch) return labeledOrderMatch[1];
+
+  // 2순위: 배송메모 별표 뒤 주문번호
+  // 예: ★변심반품 링크맘 엄감★2026041325853071
+  // 예: ★불량반품★20260123-0002995 / 제품명 / 증상
   const starOrderMatch = target.match(
     /★[^★]*(?:일반반품|변심반품|불량반품|불량교환|AS|검수)[^★]*★\s*([0-9]{8,}(?:-[0-9]+)?)/i
   );
 
   if (starOrderMatch) return starOrderMatch[1];
 
-  // 예: 20260123-0002995
+  // 3순위: 반품유형 글자 뒤에 바로 나오는 주문번호
+  // 예: 변심반품 링크맘 엄감 2026041325853071
+  // 예: 불량반품 20260123-0002995 / 제품명 / 증상
+  const returnTypeOrderMatch = target.match(
+    /(?:일반반품|변심반품|불량반품|불량교환|AS|검수)[^0-9]{0,30}([0-9]{8,}(?:-[0-9]+)?)/
+  );
+
+  if (returnTypeOrderMatch) return returnTypeOrderMatch[1];
+
+  // 4순위: 링크맘 엄감 뒤에 나오는 주문번호
+  const linkmomOrderMatch = target.match(
+    /링크맘\s*엄감[^0-9]{0,30}([0-9]{8,}(?:-[0-9]+)?)/
+  );
+
+  if (linkmomOrderMatch) return linkmomOrderMatch[1];
+
+  // 5순위: 예: 20260123-0002995
   const dashOrderMatch = target.match(/\b20\d{6}-\d{4,}\b/);
   if (dashOrderMatch) return dashOrderMatch[0];
 
-  // 예: 2026041325853071
-  const longOrderMatch = target.match(/\b20\d{12,}\b/);
+  // 6순위: 예: 2026041325853071
+  // 송장번호 12자리와 헷갈리지 않게 13자리 이상만 주문번호로 인정
+  const longOrderMatch = target.match(/\b20\d{11,}\b/);
   if (longOrderMatch) return longOrderMatch[0];
 
   return "";
@@ -148,10 +195,7 @@ function extractProductName(text: string, memo: string) {
     return "LED분유쉐이커";
   }
 
-  if (
-    compact.includes("분유쉐이커") ||
-    compact.includes("쉐이커")
-  ) {
+  if (compact.includes("분유쉐이커") || compact.includes("쉐이커")) {
     return "분유쉐이커";
   }
 

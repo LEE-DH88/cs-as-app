@@ -805,19 +805,6 @@ export default function ReturnRecordApp() {
         today.getMonth() + 1
       ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.xlsx`;
 
-      const file = new File([blob], filename, {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: "반품검사기록 엑셀",
-        });
-        setStatusMessage("엑셀 파일 공유가 완료되었습니다.");
-        return;
-      }
-
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;

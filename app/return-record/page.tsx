@@ -151,104 +151,35 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function downloadExcel(filename: string, records: ReturnRecord[]) {
-  const headers = [
-    "등록일자",
-    "송장번호",
-    "주문번호",
-    "고객명",
-    "반품유형",
-    "제품명",
-    "검사결과",
-    "비고",
-    "송장사진1",
-    "송장사진2",
-    "제품사진1",
-    "제품사진2",
-    "제품사진3",
-    "제품사진4",
-  ];
+function downloadCsv(filename: string, rows: string[][]) {
+  const csvContent = rows
+    .map((row) =>
+      row
+        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+        .join(",")
+    )
+    .join("\r\n");
 
-  const rows = records.map((record) => [
-    getDateOnly(record.createdAt),
-    record.invoiceNumber || "",
-    record.orderNumber || "",
-    record.customerName || "",
-    record.returnType || "",
-    record.productName || "",
-    record.inspectionResult || "",
-    record.note || "",
-    record.invoicePhotos[0]?.url ? "송장사진1 보기" : "",
-    record.invoicePhotos[1]?.url ? "송장사진2 보기" : "",
-    record.productPhotos[0]?.url ? "제품사진1 보기" : "",
-    record.productPhotos[1]?.url ? "제품사진2 보기" : "",
-    record.productPhotos[2]?.url ? "제품사진3 보기" : "",
-    record.productPhotos[3]?.url ? "제품사진4 보기" : "",
-  ]);
-
-  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-
-  records.forEach((record, index) => {
-    const rowNumber = index + 1;
-
-    record.invoicePhotos.slice(0, 2).forEach((photo, photoIndex) => {
-      const cellAddress = XLSX.utils.encode_cell({
-        r: rowNumber,
-        c: 8 + photoIndex,
-      });
-
-      if (worksheet[cellAddress]) {
-        worksheet[cellAddress].l = {
-          Target: photo.url,
-          Tooltip: photo.filename || "송장사진 보기",
-        };
-      }
-    });
-
-    record.productPhotos.slice(0, 4).forEach((photo, photoIndex) => {
-      const cellAddress = XLSX.utils.encode_cell({
-        r: rowNumber,
-        c: 10 + photoIndex,
-      });
-
-      if (worksheet[cellAddress]) {
-        worksheet[cellAddress].l = {
-          Target: photo.url,
-          Tooltip: photo.filename || "제품사진 보기",
-        };
-      }
-    });
+  const blob = new Blob(["\uFEFF" + csvContent], {
+    type: "text/csv;charset=utf-8;",
   });
 
-  worksheet["!autofilter"] = {
-    ref: XLSX.utils.encode_range({
-      s: { r: 0, c: 0 },
-      e: { r: rows.length, c: headers.length - 1 },
-    }),
-  };
+  const url = window.URL.createObjectURL(blob);
 
-  worksheet["!cols"] = [
-    { wch: 12 },
-    { wch: 18 },
-    { wch: 22 },
-    { wch: 12 },
-    { wch: 12 },
-    { wch: 24 },
-    { wch: 14 },
-    { wch: 35 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 16 },
-  ];
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  link.style.display = "none";
 
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "반품검사기록");
-  XLSX.writeFile(workbook, filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  setTimeout(() => {
+    window.URL.revokeObjectURL(url);
+  }, 1000);
 }
-
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -790,7 +721,7 @@ export default function ReturnRecordApp() {
     }
   }
 
-  function handleDownloadExcel() {
+  function handleDownloadCsv() {
     if (filteredRecords.length === 0) {
       setStatusError("내려받을 기록이 없습니다.");
       setStatusMessage("");
@@ -798,16 +729,38 @@ export default function ReturnRecordApp() {
     }
 
     setStatusError("");
-    setStatusMessage("엑셀 파일을 내려받는 중입니다.");
+    setStatusMessage("CSV 파일을 내려받는 중입니다.");
+
+    const rows: string[][] = [
+      [
+        "등록일자",
+        "송장번호",
+        "주문번호",
+        "고객명",
+        "반품유형",
+        "제품명",
+        "검사결과",
+        "비고",
+      ],
+      ...filteredRecords.map((record) => [
+        formatDateTime(record.createdAt),
+        record.invoiceNumber,
+        record.orderNumber,
+        record.customerName,
+        record.returnType,
+        record.productName,
+        record.inspectionResult,
+        record.note,
+      ]),
+    ];
 
     const today = new Date();
     const filename = `반품검사기록_${today.getFullYear()}${String(
       today.getMonth() + 1
-    ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.xlsx`;
+    ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.csv`;
 
-    downloadExcel(filename, filteredRecords);
+    downloadCsv(filename, rows);
   }
-
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -837,9 +790,9 @@ export default function ReturnRecordApp() {
                 새로고침
               </Button>
 
-              <Button variant="outline" onClick={handleDownloadExcel}>
+              <Button variant="outline" onClick={handleDownloadCsv}>
                 <Download className="mr-2 h-4 w-4" />
-                엑셀 내려받기
+                CSV 내려받기
               </Button>
             </div>
           </div>
@@ -1365,7 +1318,7 @@ export default function ReturnRecordApp() {
                 <div className="rounded-3xl border bg-slate-50 p-5">
                   <div className="mb-2 flex items-center gap-2 text-base font-semibold">
                     <FileText className="h-5 w-5" />
-                    보고용 엑셀 바로 추출
+                    보고용 CSV 바로 추출
                   </div>
                   <p className="text-sm leading-6 text-slate-700">
                     등록일자, 송장번호, 주문번호, 고객명, 반품유형, 제품명,
@@ -1379,7 +1332,7 @@ export default function ReturnRecordApp() {
                     추천 운영 방식
                   </div>
                   <p className="text-sm leading-6 text-amber-900">
-                    검사 전 입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 엑셀 공유
+                    검사 전 입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 CSV 공유
                     흐름으로 쓰는 게 가장 실무에 맞습니다.
                   </p>
                 </div>

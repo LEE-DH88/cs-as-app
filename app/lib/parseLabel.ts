@@ -42,6 +42,10 @@ function normalizeText(text: string) {
     .replace(/휴\s*대\s*용/g, "휴대용")
     .replace(/분\s*유\s*포\s*트/g, "분유포트")
     .replace(/분\s*유\s*쉐\s*이\s*커/g, "분유쉐이커")
+    .replace(/A\s*\/\s*S/gi, "AS")
+    .replace(/A\s+S/gi, "AS")
+    .replace(/에\s*이\s*에\s*스/g, "AS")
+    .replace(/검\s*수/g, "검수")
     .replace(/\s+/g, " ")
     .replace(/★\s+/g, "★")
     .replace(/\s+★/g, "★")
@@ -242,26 +246,11 @@ function extractProductName(text: string, memo: string) {
     compact.includes("분리형분유") ||
     compact.includes("분리형포트");
 
-  const hasPotKeyword =
-    compact.includes("휴대용분유포트") ||
-    compact.includes("휴대용분유포드") ||
-    compact.includes("휴대용포트") ||
-    compact.includes("분유포트") ||
-    compact.includes("분유포드") ||
-    compact.includes("분유폿") ||
-    compact.includes("포트");
-
   // 중요:
-  // 분리형은 "휴대용분유포트"라는 단어도 같이 포함될 수 있어서
-  // 반드시 기존 휴대용분유포트보다 먼저 검사해야 함
-  if (
-    compact.includes("분리형휴대용분유포트") ||
-    compact.includes("분리형휴대용분유포드") ||
-    compact.includes("분리형휴대용포트") ||
-    compact.includes("분리형분유포트") ||
-    compact.includes("분리형분유포드") ||
-    (hasSeparateKeyword && hasPotKeyword)
-  ) {
+  // 요청사항 기준: OCR 원문에 "분리형" 계열 글자가 보이면
+  // 다른 제품명보다 무조건 먼저 "(분리형) 휴대용분유포트"로 분류함.
+  // page.tsx의 PRODUCT_TYPES 값과 맞추기 위해 띄어쓰기 없는 값을 반환함.
+  if (hasSeparateKeyword) {
     return "(분리형) 휴대용분유포트";
   }
 

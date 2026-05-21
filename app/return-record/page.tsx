@@ -87,6 +87,18 @@ type ReturnRecord = {
   productPhotos: UploadedPhoto[];
 };
 
+type InlineEditDraft = {
+  invoiceNumber: string;
+  orderNumber: string;
+  customerName: string;
+  returnType: ReturnType;
+  productName: ProductSelectValue;
+  customProductName: string;
+  processAction: ProcessAction;
+  inspectionResult: InspectionResult;
+  note: string;
+};
+
 type OcrParsedResult = {
   trackingNumber?: string;
   invoiceNumber?: string;
@@ -373,6 +385,9 @@ export default function ReturnRecordApp() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [editingCreatedAt, setEditingCreatedAt] = useState<string | null>(null);
+  const [inlineEditingId, setInlineEditingId] = useState<string | null>(null);
+  const [inlineSavingId, setInlineSavingId] = useState<string | null>(null);
+  const [inlineEditDraft, setInlineEditDraft] = useState<InlineEditDraft | null>(null);
 
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
@@ -767,6 +782,109 @@ export default function ReturnRecordApp() {
       top: 0,
       behavior: "smooth",
     });
+  }
+
+  function makeInlineEditDraft(record: ReturnRecord): InlineEditDraft {
+    const isKnownProduct = PRODUCT_TYPES.includes(
+      record.productName as ProductSelectValue
+    );
+
+    return {
+      invoiceNumber: record.invoiceNumber || "",
+      orderNumber: record.orderNumber || "",
+      customerName: record.customerName || "",
+      returnType: record.returnType,
+      productName: isKnownProduct
+        ? (record.productName as ProductSelectValue)
+        : "직접입력",
+      customProductName: isKnownProduct ? "" : record.productName || "",
+      processAction: record.processAction || "미선택",
+      inspectionResult: record.inspectionResult,
+      note: record.note || "",
+    };
+  }
+
+  function handleInlineEditRecord(record: ReturnRecord) {
+    setInlineEditingId(record.id);
+    setInlineEditDraft(makeInlineEditDraft(record));
+    setStatusMessage("선택한 기록을 바로 수정 중입니다.");
+    setStatusError("");
+  }
+
+  function cancelInlineEdit() {
+    setInlineEditingId(null);
+    setInlineSavingId(null);
+    setInlineEditDraft(null);
+    setStatusMessage("수정을 취소했습니다.");
+  }
+
+  async function handleSaveInlineRecord(record: ReturnRecord) {
+    if (!inlineEditDraft) return;
+
+    if (
+      !inlineEditDraft.invoiceNumber.trim() &&
+      !inlineEditDraft.orderNumber.trim() &&
+      !inlineEditDraft.customerName.trim()
+    ) {
+      setStatusError("송장번호 / 주문번호 / 고객명 중 최소 1개는 입력해주세요.");
+      return;
+    }
+
+    const finalProductName =
+      inlineEditDraft.productName === "직접입력"
+        ? inlineEditDraft.customProductName.trim()
+        : inlineEditDraft.productName;
+
+    if (!finalProductName) {
+      setStatusError("제품명을 입력하거나 선택해주세요.");
+      return;
+    }
+
+    const updatedRecord: ReturnRecord = {
+      ...record,
+      invoiceNumber: inlineEditDraft.invoiceNumber.trim(),
+      orderNumber: inlineEditDraft.orderNumber.trim(),
+      customerName: inlineEditDraft.customerName.trim(),
+      returnType: inlineEditDraft.returnType,
+      productName: finalProductName,
+      processAction: inlineEditDraft.processAction,
+      inspectionResult: inlineEditDraft.inspectionResult,
+      note: inlineEditDraft.note.trim(),
+      invoicePhotos: record.invoicePhotos || [],
+      productPhotos: record.productPhotos || [],
+    };
+
+    try {
+      setInlineSavingId(record.id);
+      setStatusError("");
+      setStatusMessage("기록 수정 중입니다...");
+
+      const response = await fetch("/api/records", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updatedRecord),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "기록 수정에 실패했습니다.");
+      }
+
+      await fetchRecords();
+      setInlineEditingId(null);
+      setInlineSavingId(null);
+      setInlineEditDraft(null);
+      setStatusMessage("기록이 수정되었습니다.");
+    } catch (error) {
+      setStatusError(
+        error instanceof Error ? error.message : "기록 수정 중 오류가 발생했습니다."
+      );
+    } finally {
+      setInlineSavingId(null);
+    }
   }
 
   function cancelEdit() {
@@ -1599,173 +1717,427 @@ export default function ReturnRecordApp() {
               </div>
             ) : (
               <div className="grid gap-4">
-                {filteredRecords.map((record) => (
-                  <Card key={record.id} className="rounded-3xl border shadow-none">
-                    <CardContent className="p-5">
-                      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                              {record.productName}
-                            </span>
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                              {record.returnType}
-                            </span>
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                              {record.inspectionResult}
-                            </span>
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                              {record.processAction || "미선택"}
-                            </span>
+                {filteredRecords.map((record) => {
+                  const isInlineEditing =
+                    inlineEditingId === record.id && inlineEditDraft;
+
+                  return (
+                    <Card key={record.id} className="rounded-3xl border shadow-none">
+                      <CardContent className="p-5">
+                        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                                {isInlineEditing
+                                  ? inlineEditDraft.productName === "직접입력"
+                                    ? inlineEditDraft.customProductName || "직접입력"
+                                    : inlineEditDraft.productName
+                                  : record.productName}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                                {isInlineEditing
+                                  ? inlineEditDraft.returnType
+                                  : record.returnType}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                                {isInlineEditing
+                                  ? inlineEditDraft.inspectionResult
+                                  : record.inspectionResult}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                                {isInlineEditing
+                                  ? inlineEditDraft.processAction
+                                  : record.processAction || "미선택"}
+                              </span>
+                            </div>
+                            <p className="mt-3 text-sm text-slate-500">
+                              등록일자: {formatDateTime(record.createdAt)}
+                            </p>
                           </div>
-                          <p className="mt-3 text-sm text-slate-500">
-                            등록일자: {formatDateTime(record.createdAt)}
-                          </p>
+
+                          <div className="flex flex-wrap gap-2">
+                            {isInlineEditing ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  className="rounded-2xl"
+                                  onClick={() => handleSaveInlineRecord(record)}
+                                  disabled={inlineSavingId === record.id}
+                                >
+                                  {inlineSavingId === record.id ? (
+                                    <>
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                      저장 중...
+                                    </>
+                                  ) : (
+                                    "수정 저장"
+                                  )}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="rounded-2xl"
+                                  onClick={cancelInlineEdit}
+                                  disabled={inlineSavingId === record.id}
+                                >
+                                  취소
+                                </Button>
+                              </>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="rounded-2xl"
+                                onClick={() => handleInlineEditRecord(record)}
+                              >
+                                수정
+                              </Button>
+                            )}
+
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              className="rounded-2xl"
+                              onClick={() => handleDeleteRecord(record)}
+                              disabled={
+                                deletingId === record.id || inlineSavingId === record.id
+                              }
+                            >
+                              {deletingId === record.id ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  삭제 중...
+                                </>
+                              ) : (
+                                <>
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  삭제
+                                </>
+                              )}
+                            </Button>
+                          </div>
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="rounded-2xl"
-                            onClick={() => handleEditRecord(record)}
-                          >
-                            수정
-                          </Button>
+                        {isInlineEditing ? (
+                          <div className="space-y-4 rounded-3xl border bg-slate-50 p-4">
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <div className="space-y-2">
+                                <Label>송장번호</Label>
+                                <Input
+                                  value={inlineEditDraft.invoiceNumber}
+                                  onChange={(e) =>
+                                    setInlineEditDraft((prev) =>
+                                      prev
+                                        ? { ...prev, invoiceNumber: e.target.value }
+                                        : prev
+                                    )
+                                  }
+                                  className="rounded-2xl bg-white"
+                                />
+                              </div>
 
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          className="rounded-2xl"
-                          onClick={() => handleDeleteRecord(record)}
-                          disabled={deletingId === record.id}
-                        >
-                          {deletingId === record.id ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              삭제 중...
-                            </>
-                          ) : (
-                            <>
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              삭제
-                            </>
-                          )}
-                        </Button>
+                              <div className="space-y-2">
+                                <Label>주문번호</Label>
+                                <Input
+                                  value={inlineEditDraft.orderNumber}
+                                  onChange={(e) =>
+                                    setInlineEditDraft((prev) =>
+                                      prev
+                                        ? { ...prev, orderNumber: e.target.value }
+                                        : prev
+                                    )
+                                  }
+                                  className="rounded-2xl bg-white"
+                                />
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>고객명</Label>
+                                <Input
+                                  value={inlineEditDraft.customerName}
+                                  onChange={(e) =>
+                                    setInlineEditDraft((prev) =>
+                                      prev
+                                        ? { ...prev, customerName: e.target.value }
+                                        : prev
+                                    )
+                                  }
+                                  className="rounded-2xl bg-white"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                              <div className="space-y-2">
+                                <Label>반품유형</Label>
+                                <Select
+                                  value={inlineEditDraft.returnType}
+                                  onValueChange={(value) =>
+                                    setInlineEditDraft((prev) =>
+                                      prev
+                                        ? { ...prev, returnType: value as ReturnType }
+                                        : prev
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="rounded-2xl bg-white">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {RETURN_TYPES.map((item) => (
+                                      <SelectItem key={item} value={item}>
+                                        {item}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>제품명</Label>
+                                <Select
+                                  value={inlineEditDraft.productName}
+                                  onValueChange={(value) =>
+                                    setInlineEditDraft((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            productName: value as ProductSelectValue,
+                                            customProductName:
+                                              value === "직접입력"
+                                                ? prev.customProductName
+                                                : "",
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="rounded-2xl bg-white">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PRODUCT_TYPES.map((item) => (
+                                      <SelectItem key={item} value={item}>
+                                        {item}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+
+                                {inlineEditDraft.productName === "직접입력" && (
+                                  <Input
+                                    value={inlineEditDraft.customProductName}
+                                    onChange={(e) =>
+                                      setInlineEditDraft((prev) =>
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              customProductName: e.target.value,
+                                            }
+                                          : prev
+                                      )
+                                    }
+                                    placeholder="제품명을 직접 입력해주세요"
+                                    className="rounded-2xl bg-white"
+                                  />
+                                )}
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>검사결과</Label>
+                                <Select
+                                  value={inlineEditDraft.inspectionResult}
+                                  onValueChange={(value) =>
+                                    setInlineEditDraft((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            inspectionResult:
+                                              value as InspectionResult,
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="rounded-2xl bg-white">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {RESULT_TYPES.map((item) => (
+                                      <SelectItem key={item} value={item}>
+                                        {item}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>이동/처리</Label>
+                                <Select
+                                  value={inlineEditDraft.processAction}
+                                  onValueChange={(value) =>
+                                    setInlineEditDraft((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            processAction: value as ProcessAction,
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="rounded-2xl bg-white">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PROCESS_ACTIONS.map((item) => (
+                                      <SelectItem key={item} value={item}>
+                                        {item}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>비고</Label>
+                              <Textarea
+                                value={inlineEditDraft.note}
+                                onChange={(e) =>
+                                  setInlineEditDraft((prev) =>
+                                    prev ? { ...prev, note: e.target.value } : prev
+                                  )
+                                }
+                                className="min-h-[100px] rounded-2xl bg-white"
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                              <div className="rounded-2xl bg-slate-50 p-4">
+                                <p className="text-xs text-slate-500">송장번호</p>
+                                <p className="mt-1 font-medium">
+                                  {record.invoiceNumber || "-"}
+                                </p>
+                              </div>
+
+                              <div className="rounded-2xl bg-slate-50 p-4">
+                                <p className="text-xs text-slate-500">주문번호</p>
+                                <p className="mt-1 font-medium">
+                                  {record.orderNumber || "-"}
+                                </p>
+                              </div>
+
+                              <div className="rounded-2xl bg-slate-50 p-4">
+                                <p className="text-xs text-slate-500">고객명</p>
+                                <p className="mt-1 font-medium">
+                                  {record.customerName || "-"}
+                                </p>
+                              </div>
+
+                              <div className="rounded-2xl bg-slate-50 p-4">
+                                <p className="text-xs text-slate-500">이동/처리</p>
+                                <p className="mt-1 font-medium">
+                                  {record.processAction || "미선택"}
+                                </p>
+                              </div>
+
+                              <div className="rounded-2xl bg-slate-50 p-4">
+                                <p className="text-xs text-slate-500">사진 수</p>
+                                <p className="mt-1 font-medium">
+                                  송장 {record.invoicePhotos.length}장 / 제품{" "}
+                                  {record.productPhotos.length}장
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                              <p className="text-xs text-slate-500">비고</p>
+                              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                {record.note || "-"}
+                              </p>
+                            </div>
+                          </>
+                        )}
+
+                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                          <div>
+                            <p className="mb-2 font-medium">송장 사진</p>
+                            {record.invoicePhotos.length === 0 ? (
+                              <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+                                등록된 사진이 없습니다.
+                              </div>
+                            ) : (
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                {record.invoicePhotos.map((photo) => (
+                                  <a
+                                    key={photo.url}
+                                    href={photo.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="overflow-hidden rounded-2xl border bg-white"
+                                  >
+                                    <img
+                                      src={photo.url}
+                                      alt={photo.filename}
+                                      className="h-40 w-full object-cover"
+                                    />
+                                    <div className="p-3 text-sm">
+                                      <p className="truncate font-medium">
+                                        {photo.filename}
+                                      </p>
+                                      <p className="text-slate-500">
+                                        {formatBytes(photo.size)}
+                                      </p>
+                                    </div>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <p className="mb-2 font-medium">제품 사진</p>
+                            {record.productPhotos.length === 0 ? (
+                              <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+                                등록된 사진이 없습니다.
+                              </div>
+                            ) : (
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                {record.productPhotos.map((photo) => (
+                                  <a
+                                    key={photo.url}
+                                    href={photo.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="overflow-hidden rounded-2xl border bg-white"
+                                  >
+                                    <img
+                                      src={photo.url}
+                                      alt={photo.filename}
+                                      className="h-40 w-full object-cover"
+                                    />
+                                    <div className="p-3 text-sm">
+                                      <p className="truncate font-medium">
+                                        {photo.filename}
+                                      </p>
+                                      <p className="text-slate-500">
+                                        {formatBytes(photo.size)}
+                                      </p>
+                                    </div>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                        <div className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-xs text-slate-500">송장번호</p>
-                          <p className="mt-1 font-medium">
-                            {record.invoiceNumber || "-"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-xs text-slate-500">주문번호</p>
-                          <p className="mt-1 font-medium">
-                            {record.orderNumber || "-"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-xs text-slate-500">고객명</p>
-                          <p className="mt-1 font-medium">
-                            {record.customerName || "-"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-xs text-slate-500">이동/처리</p>
-                          <p className="mt-1 font-medium">
-                            {record.processAction || "미선택"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-xs text-slate-500">사진 수</p>
-                          <p className="mt-1 font-medium">
-                            송장 {record.invoicePhotos.length}장 / 제품{" "}
-                            {record.productPhotos.length}장
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                        <p className="text-xs text-slate-500">비고</p>
-                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                          {record.note || "-"}
-                        </p>
-                      </div>
-
-                      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-  <div>
-    <p className="mb-2 font-medium">송장 사진</p>
-    {record.invoicePhotos.length === 0 ? (
-      <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
-        등록된 사진이 없습니다.
-      </div>
-    ) : (
-      <div className="grid gap-3 sm:grid-cols-2">
-        {record.invoicePhotos.map((photo) => (
-          <a
-            key={photo.url}
-            href={photo.url}
-            target="_blank"
-            rel="noreferrer"
-            className="overflow-hidden rounded-2xl border bg-white"
-          >
-            <img
-              src={photo.url}
-              alt={photo.filename}
-              className="h-40 w-full object-cover"
-            />
-            <div className="p-3 text-sm">
-              <p className="truncate font-medium">{photo.filename}</p>
-              <p className="text-slate-500">{formatBytes(photo.size)}</p>
-            </div>
-          </a>
-        ))}
-      </div>
-    )}
-  </div>
-
-  <div>
-    <p className="mb-2 font-medium">제품 사진</p>
-    {record.productPhotos.length === 0 ? (
-      <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
-        등록된 사진이 없습니다.
-      </div>
-    ) : (
-      <div className="grid gap-3 sm:grid-cols-2">
-        {record.productPhotos.map((photo) => (
-          <a
-            key={photo.url}
-            href={photo.url}
-            target="_blank"
-            rel="noreferrer"
-            className="overflow-hidden rounded-2xl border bg-white"
-          >
-            <img
-              src={photo.url}
-              alt={photo.filename}
-              className="h-40 w-full object-cover"
-            />
-            <div className="p-3 text-sm">
-              <p className="truncate font-medium">{photo.filename}</p>
-              <p className="text-slate-500">{formatBytes(photo.size)}</p>
-            </div>
-          </a>
-        ))}
-      </div>
-    )}
-  </div>
-</div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             )}
           </CardContent>

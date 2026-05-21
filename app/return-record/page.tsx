@@ -38,13 +38,25 @@ type ReturnType =
   | "일반반품"
   | "변심반품"
   | "불량반품"
-  | "불량교환";
+  | "불량교환"
+  | "AS"
+  | "검수";
 
-type ProductType =
+type ProductType = string;
+
+type ProductSelectValue =
   | "휴대용분유포트"
   | "(분리형) 휴대용분유포트"
   | "분유쉐이커"
-  | "LED분유쉐이커";
+  | "LED분유쉐이커"
+  | "직접입력";
+
+type ProcessAction =
+  | "미선택"
+  | "안성물류이동"
+  | "안성물류폐기이동"
+  | "자체폐기"
+  | "자체 B급활용";
 
 type InspectionResult =
   | "검사 대기"
@@ -68,6 +80,7 @@ type ReturnRecord = {
   customerName: string;
   returnType: ReturnType;
   productName: ProductType;
+  processAction?: ProcessAction;
   inspectionResult: InspectionResult;
   note: string;
   invoicePhotos: UploadedPhoto[];
@@ -89,13 +102,24 @@ const RETURN_TYPES: ReturnType[] = [
   "변심반품",
   "불량반품",
   "불량교환",
+  "AS",
+  "검수",
 ];
 
-const PRODUCT_TYPES: ProductType[] = [
+const PRODUCT_TYPES: ProductSelectValue[] = [
   "휴대용분유포트",
   "(분리형) 휴대용분유포트",
   "분유쉐이커",
   "LED분유쉐이커",
+  "직접입력",
+];
+
+const PROCESS_ACTIONS: ProcessAction[] = [
+  "미선택",
+  "안성물류이동",
+  "안성물류폐기이동",
+  "자체폐기",
+  "자체 B급활용",
 ];
 
 const RESULT_TYPES: InspectionResult[] = [
@@ -151,35 +175,107 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function downloadCsv(filename: string, rows: string[][]) {
-  const csvContent = rows
-    .map((row) =>
-      row
-        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
-        .join(",")
-    )
-    .join("\r\n");
+function downloadExcel(filename: string, records: ReturnRecord[]) {
+  const headers = [
+    "등록일자",
+    "송장번호",
+    "주문번호",
+    "고객명",
+    "반품유형",
+    "제품명",
+    "검사결과",
+    "이동/처리",
+    "비고",
+    "송장사진1",
+    "송장사진2",
+    "제품사진1",
+    "제품사진2",
+    "제품사진3",
+    "제품사진4",
+  ];
 
-  const blob = new Blob(["\uFEFF" + csvContent], {
-    type: "text/csv;charset=utf-8;",
+  const rows = records.map((record) => [
+    getDateOnly(record.createdAt),
+    record.invoiceNumber || "",
+    record.orderNumber || "",
+    record.customerName || "",
+    record.returnType || "",
+    record.productName || "",
+    record.inspectionResult || "",
+    record.processAction || "미선택",
+    record.note || "",
+    record.invoicePhotos[0]?.url ? "송장사진1 보기" : "",
+    record.invoicePhotos[1]?.url ? "송장사진2 보기" : "",
+    record.productPhotos[0]?.url ? "제품사진1 보기" : "",
+    record.productPhotos[1]?.url ? "제품사진2 보기" : "",
+    record.productPhotos[2]?.url ? "제품사진3 보기" : "",
+    record.productPhotos[3]?.url ? "제품사진4 보기" : "",
+  ]);
+
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+  records.forEach((record, index) => {
+    const rowNumber = index + 1;
+
+    record.invoicePhotos.slice(0, 2).forEach((photo, photoIndex) => {
+      const cellAddress = XLSX.utils.encode_cell({
+        r: rowNumber,
+        c: 9 + photoIndex,
+      });
+
+      if (worksheet[cellAddress]) {
+        worksheet[cellAddress].l = {
+          Target: photo.url,
+          Tooltip: photo.filename || "송장사진 보기",
+        };
+      }
+    });
+
+    record.productPhotos.slice(0, 4).forEach((photo, photoIndex) => {
+      const cellAddress = XLSX.utils.encode_cell({
+        r: rowNumber,
+        c: 11 + photoIndex,
+      });
+
+      if (worksheet[cellAddress]) {
+        worksheet[cellAddress].l = {
+          Target: photo.url,
+          Tooltip: photo.filename || "제품사진 보기",
+        };
+      }
+    });
   });
 
-  const url = window.URL.createObjectURL(blob);
+  worksheet["!autofilter"] = {
+    ref: XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: rows.length, c: headers.length - 1 },
+    }),
+  };
 
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.rel = "noopener";
-  link.style.display = "none";
+  worksheet["!cols"] = [
+    { wch: 12 },
+    { wch: 18 },
+    { wch: 22 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 24 },
+    { wch: 14 },
+    { wch: 18 },
+    { wch: 35 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 16 },
+  ];
 
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  setTimeout(() => {
-    window.URL.revokeObjectURL(url);
-  }, 1000);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "반품검사기록");
+  XLSX.writeFile(workbook, filename);
 }
+
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -282,7 +378,9 @@ export default function ReturnRecordApp() {
   const [orderNumber, setOrderNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [returnType, setReturnType] = useState<ReturnType>("일반반품");
-  const [productName, setProductName] = useState<ProductType>("휴대용분유포트");
+  const [productName, setProductName] = useState<ProductSelectValue>("휴대용분유포트");
+  const [customProductName, setCustomProductName] = useState("");
+  const [processAction, setProcessAction] = useState<ProcessAction>("미선택");
   const [inspectionResult, setInspectionResult] =
     useState<InspectionResult>("검사 대기");
   const [note, setNote] = useState("");
@@ -353,6 +451,17 @@ export default function ReturnRecordApp() {
     };
   }, [records]);
 
+  const productFilterOptions = useMemo(() => {
+    const productSet = new Set<string>();
+    PRODUCT_TYPES.filter((item) => item !== "직접입력").forEach((item) =>
+      productSet.add(item)
+    );
+    records.forEach((record) => {
+      if (record.productName) productSet.add(record.productName);
+    });
+    return Array.from(productSet);
+  }, [records]);
+
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
       const matchesSearch =
@@ -364,6 +473,7 @@ export default function ReturnRecordApp() {
           record.returnType,
           record.productName,
           record.inspectionResult,
+          record.processAction || "미선택",
           record.note,
         ]
           .join(" ")
@@ -389,6 +499,8 @@ export default function ReturnRecordApp() {
     setCustomerName("");
     setReturnType("일반반품");
     setProductName("휴대용분유포트");
+    setCustomProductName("");
+    setProcessAction("미선택");
     setInspectionResult("검사 대기");
     setNote("");
     setInvoicePhotos([]);
@@ -401,6 +513,38 @@ export default function ReturnRecordApp() {
     setEditingCreatedAt(null);
   }
 
+  function normalizeProductName(value?: string, rawText?: string) {
+    const text = `${value || ""} ${rawText || ""}`.replace(/\s+/g, "");
+
+    if (text.includes("분리형")) {
+      return "(분리형) 휴대용분유포트";
+    }
+
+    if (value && PRODUCT_TYPES.includes(value as ProductSelectValue)) {
+      return value;
+    }
+
+    return value || "";
+  }
+
+  function detectReturnType(parsed: OcrParsedResult) {
+    const text = `${parsed.returnType || ""} ${parsed.rawText || ""}`.toUpperCase();
+
+    if (/\bA\s*\/?\s*S\b|AS|에이에스|수리/.test(text)) {
+      return "AS" as ReturnType;
+    }
+
+    if (text.includes("검수")) {
+      return "검수" as ReturnType;
+    }
+
+    if (parsed.returnType && RETURN_TYPES.includes(parsed.returnType as ReturnType)) {
+      return parsed.returnType as ReturnType;
+    }
+
+    return null;
+  }
+
   function applyOcrResult(parsed: OcrParsedResult) {
     const detectedInvoiceNumber = parsed.trackingNumber || parsed.invoiceNumber;
 
@@ -408,18 +552,24 @@ export default function ReturnRecordApp() {
     if (parsed.orderNumber) setOrderNumber(parsed.orderNumber);
     if (parsed.customerName) setCustomerName(parsed.customerName);
 
-    if (
-      parsed.returnType &&
-      RETURN_TYPES.includes(parsed.returnType as ReturnType)
-    ) {
-      setReturnType(parsed.returnType as ReturnType);
+    const detectedReturnType = detectReturnType(parsed);
+    if (detectedReturnType) {
+      setReturnType(detectedReturnType);
     }
 
-    if (
-      parsed.productName &&
-      PRODUCT_TYPES.includes(parsed.productName as ProductType)
-    ) {
-      setProductName(parsed.productName as ProductType);
+    const normalizedProductName = normalizeProductName(
+      parsed.productName,
+      parsed.rawText
+    );
+
+    if (normalizedProductName) {
+      if (PRODUCT_TYPES.includes(normalizedProductName as ProductSelectValue)) {
+        setProductName(normalizedProductName as ProductSelectValue);
+        setCustomProductName("");
+      } else {
+        setProductName("직접입력");
+        setCustomProductName(normalizedProductName);
+      }
     }
 
     setOcrRawText(parsed.rawText || "");
@@ -597,7 +747,14 @@ export default function ReturnRecordApp() {
     setOrderNumber(record.orderNumber || "");
     setCustomerName(record.customerName || "");
     setReturnType(record.returnType);
-    setProductName(record.productName);
+    if (PRODUCT_TYPES.includes(record.productName as ProductSelectValue)) {
+      setProductName(record.productName as ProductSelectValue);
+      setCustomProductName("");
+    } else {
+      setProductName("직접입력");
+      setCustomProductName(record.productName || "");
+    }
+    setProcessAction(record.processAction || "미선택");
     setInspectionResult(record.inspectionResult);
     setNote(record.note || "");
     setInvoicePhotos(record.invoicePhotos || []);
@@ -628,6 +785,14 @@ export default function ReturnRecordApp() {
       return;
     }
 
+    const finalProductName =
+      productName === "직접입력" ? customProductName.trim() : productName;
+
+    if (!finalProductName) {
+      setStatusError("제품명을 입력하거나 선택해주세요.");
+      return;
+    }
+
     const isEditing = Boolean(editingRecordId);
 
     const newRecord: ReturnRecord = {
@@ -637,7 +802,8 @@ export default function ReturnRecordApp() {
       orderNumber: orderNumber.trim(),
       customerName: customerName.trim(),
       returnType,
-      productName,
+      productName: finalProductName,
+      processAction,
       inspectionResult,
       note: note.trim(),
       invoicePhotos,
@@ -721,7 +887,7 @@ export default function ReturnRecordApp() {
     }
   }
 
-  function handleDownloadCsv() {
+  function handleDownloadExcel() {
     if (filteredRecords.length === 0) {
       setStatusError("내려받을 기록이 없습니다.");
       setStatusMessage("");
@@ -729,38 +895,16 @@ export default function ReturnRecordApp() {
     }
 
     setStatusError("");
-    setStatusMessage("CSV 파일을 내려받는 중입니다.");
-
-    const rows: string[][] = [
-      [
-        "등록일자",
-        "송장번호",
-        "주문번호",
-        "고객명",
-        "반품유형",
-        "제품명",
-        "검사결과",
-        "비고",
-      ],
-      ...filteredRecords.map((record) => [
-        formatDateTime(record.createdAt),
-        record.invoiceNumber,
-        record.orderNumber,
-        record.customerName,
-        record.returnType,
-        record.productName,
-        record.inspectionResult,
-        record.note,
-      ]),
-    ];
+    setStatusMessage("엑셀 파일을 내려받는 중입니다.");
 
     const today = new Date();
     const filename = `반품검사기록_${today.getFullYear()}${String(
       today.getMonth() + 1
-    ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.csv`;
+    ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.xlsx`;
 
-    downloadCsv(filename, rows);
+    downloadExcel(filename, filteredRecords);
   }
+
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -773,7 +917,7 @@ export default function ReturnRecordApp() {
               </h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 대상: 휴대용분유포트 · (분리형) 휴대용분유포트 · 분유쉐이커 · LED분유쉐이커 / 일반반품 ·
-                변심반품 · 불량반품 · 불량교환
+                변심반품 · 불량반품 · 불량교환 · AS · 검수
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-500">
                 기록은 서버에 저장되므로 PC와 휴대폰에서 동일하게 조회됩니다.
@@ -790,9 +934,9 @@ export default function ReturnRecordApp() {
                 새로고침
               </Button>
 
-              <Button variant="outline" onClick={handleDownloadCsv}>
+              <Button variant="outline" onClick={handleDownloadExcel}>
                 <Download className="mr-2 h-4 w-4" />
-                CSV 내려받기
+                엑셀 내려받기
               </Button>
             </div>
           </div>
@@ -921,7 +1065,7 @@ export default function ReturnRecordApp() {
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
                   <Label>반품유형</Label>
                   <Select
@@ -945,7 +1089,12 @@ export default function ReturnRecordApp() {
                   <Label>제품명</Label>
                   <Select
                     value={productName}
-                    onValueChange={(value) => setProductName(value as ProductType)}
+                    onValueChange={(value) => {
+                      setProductName(value as ProductSelectValue);
+                      if (value !== "직접입력") {
+                        setCustomProductName("");
+                      }
+                    }}
                   >
                     <SelectTrigger className="rounded-2xl">
                       <SelectValue />
@@ -958,6 +1107,15 @@ export default function ReturnRecordApp() {
                       ))}
                     </SelectContent>
                   </Select>
+
+                  {productName === "직접입력" && (
+                    <Input
+                      value={customProductName}
+                      onChange={(e) => setCustomProductName(e.target.value)}
+                      placeholder="제품명을 직접 입력해주세요"
+                      className="rounded-2xl"
+                    />
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -973,6 +1131,25 @@ export default function ReturnRecordApp() {
                     </SelectTrigger>
                     <SelectContent>
                       {RESULT_TYPES.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>이동/처리</Label>
+                  <Select
+                    value={processAction}
+                    onValueChange={(value) => setProcessAction(value as ProcessAction)}
+                  >
+                    <SelectTrigger className="rounded-2xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PROCESS_ACTIONS.map((item) => (
                         <SelectItem key={item} value={item}>
                           {item}
                         </SelectItem>
@@ -1318,7 +1495,7 @@ export default function ReturnRecordApp() {
                 <div className="rounded-3xl border bg-slate-50 p-5">
                   <div className="mb-2 flex items-center gap-2 text-base font-semibold">
                     <FileText className="h-5 w-5" />
-                    보고용 CSV 바로 추출
+                    보고용 엑셀 바로 추출
                   </div>
                   <p className="text-sm leading-6 text-slate-700">
                     등록일자, 송장번호, 주문번호, 고객명, 반품유형, 제품명,
@@ -1332,7 +1509,7 @@ export default function ReturnRecordApp() {
                     추천 운영 방식
                   </div>
                   <p className="text-sm leading-6 text-amber-900">
-                    검사 전 입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 CSV 공유
+                    검사 전 입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 엑셀 공유
                     흐름으로 쓰는 게 가장 실무에 맞습니다.
                   </p>
                 </div>
@@ -1383,7 +1560,7 @@ export default function ReturnRecordApp() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="전체">전체 제품</SelectItem>
-                  {PRODUCT_TYPES.map((item) => (
+                  {productFilterOptions.map((item) => (
                     <SelectItem key={item} value={item}>
                       {item}
                     </SelectItem>
@@ -1437,6 +1614,9 @@ export default function ReturnRecordApp() {
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                               {record.inspectionResult}
                             </span>
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                              {record.processAction || "미선택"}
+                            </span>
                           </div>
                           <p className="mt-3 text-sm text-slate-500">
                             등록일자: {formatDateTime(record.createdAt)}
@@ -1475,7 +1655,7 @@ export default function ReturnRecordApp() {
                         </div>
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                         <div className="rounded-2xl bg-slate-50 p-4">
                           <p className="text-xs text-slate-500">송장번호</p>
                           <p className="mt-1 font-medium">
@@ -1494,6 +1674,13 @@ export default function ReturnRecordApp() {
                           <p className="text-xs text-slate-500">고객명</p>
                           <p className="mt-1 font-medium">
                             {record.customerName || "-"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-slate-50 p-4">
+                          <p className="text-xs text-slate-500">이동/처리</p>
+                          <p className="mt-1 font-medium">
+                            {record.processAction || "미선택"}
                           </p>
                         </div>
 

@@ -124,27 +124,6 @@ function formatDateTime(value: string) {
   });
 }
 
-function getDateOnly(value: string) {
-  if (!value) return "";
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
-  }
-
-  if (value.includes("T")) {
-    return value.split("T")[0];
-  }
-
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -294,7 +273,6 @@ export default function ReturnRecordApp() {
   const [uploadingProduct, setUploadingProduct] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [searchDate, setSearchDate] = useState("");
   const [filterProduct, setFilterProduct] = useState<string>("전체");
   const [filterResult, setFilterResult] = useState<string>("전체");
 
@@ -370,18 +348,15 @@ export default function ReturnRecordApp() {
           .toLowerCase()
           .includes(searchTerm.toLowerCase());
 
-      const matchesDate =
-        !searchDate || getDateOnly(record.createdAt) === searchDate;
-
       const matchesProduct =
         filterProduct === "전체" || record.productName === filterProduct;
 
       const matchesResult =
         filterResult === "전체" || record.inspectionResult === filterResult;
 
-      return matchesSearch && matchesDate && matchesProduct && matchesResult;
+      return matchesSearch && matchesProduct && matchesResult;
     });
-  }, [records, searchTerm, searchDate, filterProduct, filterResult]);
+  }, [records, searchTerm, filterProduct, filterResult]);
 
   function resetForm() {
     setInvoiceNumber("");
@@ -1346,27 +1321,7 @@ export default function ReturnRecordApp() {
             <CardTitle className="text-2xl">기록 조회</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="grid gap-3 md:grid-cols-[0.9fr_1.5fr_0.8fr_0.8fr_auto]">
-              <div className="flex gap-2">
-                <Input
-                  type="date"
-                  value={searchDate}
-                  onChange={(e) => setSearchDate(e.target.value)}
-                  className="rounded-2xl"
-                />
-
-                {searchDate && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-2xl px-3"
-                    onClick={() => setSearchDate("")}
-                  >
-                    전체
-                  </Button>
-                )}
-              </div>
-
+            <div className="grid gap-3 md:grid-cols-[1.5fr_0.8fr_0.8fr_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input

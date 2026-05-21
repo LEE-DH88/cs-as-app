@@ -124,20 +124,61 @@ function formatDateTime(value: string) {
   });
 }
 
+function getDateOnly(value: string) {
+  if (!value) return "";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  if (value.includes("T")) {
+    return value.split("T")[0];
+  }
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function formatDateOnly(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value || "").slice(0, 10);
-  return d.toISOString().slice(0, 10);
-}
+function downloadCsv(filename: string, rows: string[][]) {
+  const csvContent = rows
+    .map((row) =>
+      row
+        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+        .join(",")
+    )
+    .join("\r\n");
 
-function getPhotoUrl(photos: UploadedPhoto[], index: number) {
-  return photos[index]?.url || "";
+  const blob = new Blob(["\uFEFF" + csvContent], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = window.URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  link.style.display = "none";
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  setTimeout(() => {
+    window.URL.revokeObjectURL(url);
+  }, 1000);
 }
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
@@ -253,6 +294,7 @@ export default function ReturnRecordApp() {
   const [uploadingProduct, setUploadingProduct] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchDate, setSearchDate] = useState("");
   const [filterProduct, setFilterProduct] = useState<string>("전체");
   const [filterResult, setFilterResult] = useState<string>("전체");
 
@@ -328,15 +370,18 @@ export default function ReturnRecordApp() {
           .toLowerCase()
           .includes(searchTerm.toLowerCase());
 
+      const matchesDate =
+        !searchDate || getDateOnly(record.createdAt) === searchDate;
+
       const matchesProduct =
         filterProduct === "전체" || record.productName === filterProduct;
 
       const matchesResult =
         filterResult === "전체" || record.inspectionResult === filterResult;
 
-      return matchesSearch && matchesProduct && matchesResult;
+      return matchesSearch && matchesDate && matchesProduct && matchesResult;
     });
-  }, [records, searchTerm, filterProduct, filterResult]);
+  }, [records, searchTerm, searchDate, filterProduct, filterResult]);
 
   function resetForm() {
     setInvoiceNumber("");
@@ -676,18 +721,18 @@ export default function ReturnRecordApp() {
     }
   }
 
-  async function handleDownloadXlsx() {
+  function handleDownloadCsv() {
     if (filteredRecords.length === 0) {
       setStatusError("내려받을 기록이 없습니다.");
       setStatusMessage("");
       return;
     }
 
-    try {
-      setStatusError("");
-      setStatusMessage("엑셀 파일을 내려받는 중입니다.");
+    setStatusError("");
+    setStatusMessage("CSV 파일을 내려받는 중입니다.");
 
-      const headers = [
+    const rows: string[][] = [
+      [
         "등록일자",
         "송장번호",
         "주문번호",
@@ -696,141 +741,26 @@ export default function ReturnRecordApp() {
         "제품명",
         "검사결과",
         "비고",
-        "송장사진1",
-        "송장사진2",
-        "제품사진1",
-        "제품사진2",
-        "제품사진3",
-        "제품사진4",
-      ];
+      ],
+      ...filteredRecords.map((record) => [
+        formatDateTime(record.createdAt),
+        record.invoiceNumber,
+        record.orderNumber,
+        record.customerName,
+        record.returnType,
+        record.productName,
+        record.inspectionResult,
+        record.note,
+      ]),
+    ];
 
-      const rows = filteredRecords.map((record) => [
-        formatDateOnly(record.createdAt),
-        record.invoiceNumber || "",
-        record.orderNumber || "",
-        record.customerName || "",
-        record.returnType || "",
-        record.productName || "",
-        record.inspectionResult || "",
-        record.note || "",
-        getPhotoUrl(record.invoicePhotos || [], 0) ? "사진보기" : "",
-        getPhotoUrl(record.invoicePhotos || [], 1) ? "사진보기" : "",
-        getPhotoUrl(record.productPhotos || [], 0) ? "사진보기" : "",
-        getPhotoUrl(record.productPhotos || [], 1) ? "사진보기" : "",
-        getPhotoUrl(record.productPhotos || [], 2) ? "사진보기" : "",
-        getPhotoUrl(record.productPhotos || [], 3) ? "사진보기" : "",
-      ]);
+    const today = new Date();
+    const filename = `반품검사기록_${today.getFullYear()}${String(
+      today.getMonth() + 1
+    ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.csv`;
 
-      const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-
-      worksheet["!cols"] = [
-        { wch: 12 }, // 등록일자
-        { wch: 18 }, // 송장번호
-        { wch: 24 }, // 주문번호
-        { wch: 12 }, // 고객명
-        { wch: 14 }, // 반품유형
-        { wch: 24 }, // 제품명
-        { wch: 16 }, // 검사결과
-        { wch: 36 }, // 비고
-        { wch: 14 }, // 송장사진1
-        { wch: 14 }, // 송장사진2
-        { wch: 14 }, // 제품사진1
-        { wch: 14 }, // 제품사진2
-        { wch: 14 }, // 제품사진3
-        { wch: 14 }, // 제품사진4
-      ];
-
-      worksheet["!autofilter"] = {
-        ref: `A1:N${filteredRecords.length + 1}`,
-      };
-
-      filteredRecords.forEach((record, index) => {
-        const excelRow = index + 2;
-
-        const dateCell = worksheet[`A${excelRow}`];
-        if (dateCell) {
-          dateCell.t = "s";
-          dateCell.z = "yyyy-mm-dd";
-        }
-
-        const invoiceCell = worksheet[`B${excelRow}`];
-        if (invoiceCell) {
-          invoiceCell.t = "s";
-          invoiceCell.z = "@";
-        }
-
-        const orderCell = worksheet[`C${excelRow}`];
-        if (orderCell) {
-          orderCell.t = "s";
-          orderCell.z = "@";
-        }
-
-        const photoCells = [
-          { cell: `I${excelRow}`, url: getPhotoUrl(record.invoicePhotos || [], 0), label: "송장사진1 보기" },
-          { cell: `J${excelRow}`, url: getPhotoUrl(record.invoicePhotos || [], 1), label: "송장사진2 보기" },
-          { cell: `K${excelRow}`, url: getPhotoUrl(record.productPhotos || [], 0), label: "제품사진1 보기" },
-          { cell: `L${excelRow}`, url: getPhotoUrl(record.productPhotos || [], 1), label: "제품사진2 보기" },
-          { cell: `M${excelRow}`, url: getPhotoUrl(record.productPhotos || [], 2), label: "제품사진3 보기" },
-          { cell: `N${excelRow}`, url: getPhotoUrl(record.productPhotos || [], 3), label: "제품사진4 보기" },
-        ];
-
-        photoCells.forEach((item) => {
-          const targetCell = worksheet[item.cell];
-
-          if (item.url && targetCell) {
-            targetCell.t = "s";
-            targetCell.v = "사진보기";
-            targetCell.l = {
-              Target: item.url,
-              Tooltip: item.label,
-            };
-          }
-        });
-      });
-
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "반품기록");
-
-      const xlsxBuffer = XLSX.write(workbook, {
-        bookType: "xlsx",
-        type: "array",
-      });
-
-      const blob = new Blob([xlsxBuffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-
-      const today = new Date();
-      const filename = `반품검사기록_${today.getFullYear()}${String(
-        today.getMonth() + 1
-      ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.xlsx`;
-
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      link.rel = "noopener";
-      link.style.display = "none";
-
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-      }, 1000);
-
-      setStatusMessage("엑셀 파일 다운로드가 완료되었습니다.");
-    } catch (error) {
-      setStatusMessage("");
-      setStatusError(
-        error instanceof Error
-          ? error.message
-          : "엑셀 파일 다운로드 중 오류가 발생했습니다."
-      );
-    }
+    downloadCsv(filename, rows);
   }
-
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -860,9 +790,9 @@ export default function ReturnRecordApp() {
                 새로고침
               </Button>
 
-              <Button variant="outline" onClick={handleDownloadXlsx}>
+              <Button variant="outline" onClick={handleDownloadCsv}>
                 <Download className="mr-2 h-4 w-4" />
-                엑셀 내려받기
+                CSV 내려받기
               </Button>
             </div>
           </div>
@@ -1388,11 +1318,11 @@ export default function ReturnRecordApp() {
                 <div className="rounded-3xl border bg-slate-50 p-5">
                   <div className="mb-2 flex items-center gap-2 text-base font-semibold">
                     <FileText className="h-5 w-5" />
-                    보고용 엑셀 바로 추출
+                    보고용 CSV 바로 추출
                   </div>
                   <p className="text-sm leading-6 text-slate-700">
                     등록일자, 송장번호, 주문번호, 고객명, 반품유형, 제품명,
-                    검사결과, 비고 항목과 사진보기 링크까지 내려받을 수 있게 맞춰두었습니다.
+                    검사결과, 비고 항목으로 내려받을 수 있게 맞춰두었습니다.
                   </p>
                 </div>
 
@@ -1402,7 +1332,7 @@ export default function ReturnRecordApp() {
                     추천 운영 방식
                   </div>
                   <p className="text-sm leading-6 text-amber-900">
-                    검사 전 입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 엑셀 공유
+                    검사 전 입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 CSV 공유
                     흐름으로 쓰는 게 가장 실무에 맞습니다.
                   </p>
                 </div>
@@ -1416,7 +1346,27 @@ export default function ReturnRecordApp() {
             <CardTitle className="text-2xl">기록 조회</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="grid gap-3 md:grid-cols-[1.5fr_0.8fr_0.8fr_auto]">
+            <div className="grid gap-3 md:grid-cols-[0.9fr_1.5fr_0.8fr_0.8fr_auto]">
+              <div className="flex gap-2">
+                <Input
+                  type="date"
+                  value={searchDate}
+                  onChange={(e) => setSearchDate(e.target.value)}
+                  className="rounded-2xl"
+                />
+
+                {searchDate && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-2xl px-3"
+                    onClick={() => setSearchDate("")}
+                  >
+                    전체
+                  </Button>
+                )}
+              </div>
+
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input

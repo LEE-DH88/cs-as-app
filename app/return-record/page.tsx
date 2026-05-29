@@ -187,6 +187,93 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+
+function formatNotionProcessDate(value: string) {
+  const dateOnly = getDateOnly(value);
+  const match = dateOnly.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) return dateOnly;
+
+  return `${match[1]}년 ${Number(match[2])}월 ${Number(match[3])}일`;
+}
+
+function formatNotionProductName(productName: string) {
+  const normalized = productName.trim();
+
+  // 노션 처리현황에는 아래 4종 제품만 포함
+  // 젖병살균세척기 등 기타 제품은 B급활용이어도 제외
+  const productMap: Record<string, string> = {
+    "휴대용분유포트": "[꿈비] 휴대용 분유포트",
+    "(분리형) 휴대용분유포트": "[꿈비] 분리형 휴대용 분유포트",
+    "분유쉐이커": "[꿈비] 분유쉐이커",
+    "LED분유쉐이커": "[꿈비] 뭉침없이 조용한 분유쉐이커",
+  };
+
+  return productMap[normalized] || "";
+}
+
+function notionDateToTime(value: string) {
+  const match = value.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+
+  if (!match) return 0;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  return new Date(year, month - 1, day).getTime();
+}
+
+function getNotionProcessResult(record: ReturnRecord) {
+  // 자체폐기는 노션 처리현황에 기재하지 않음
+  if (record.processAction === "자체폐기") {
+    return "";
+  }
+
+  // 자체 B급활용은 원자재화로 기재
+  if (record.processAction === "자체 B급활용") {
+    return "원자재화";
+  }
+
+  // 정상화 완료는 재상품화로 기재
+  if (record.inspectionResult === "정상화 완료") {
+    return "재상품화";
+  }
+
+  return "";
+}
+
+function buildNotionProcessRows(records: ReturnRecord[]) {
+  const summaryMap = new Map<string, number>();
+
+  records.forEach((record) => {
+    const processDate = formatNotionProcessDate(record.createdAt);
+    const productName = formatNotionProductName(record.productName || "");
+    const processResult = getNotionProcessResult(record);
+
+    if (!processDate || !productName || !processResult) return;
+
+    const key = `${processDate}|||${productName}|||${processResult}`;
+    summaryMap.set(key, (summaryMap.get(key) || 0) + 1);
+  });
+
+  return Array.from(summaryMap.entries())
+    .map(([key, count]) => {
+      const [processDate, productName, processResult] = key.split("|||");
+
+      return [processDate, productName, processResult, count];
+    })
+    .sort((a, b) => {
+      const dateCompare = notionDateToTime(String(b[0])) - notionDateToTime(String(a[0]));
+      if (dateCompare !== 0) return dateCompare;
+
+      const productCompare = String(a[1]).localeCompare(String(b[1]), "ko-KR");
+      if (productCompare !== 0) return productCompare;
+
+      return String(a[2]).localeCompare(String(b[2]), "ko-KR");
+    });
+}
+
 function downloadExcel(filename: string, records: ReturnRecord[]) {
   const headers = [
     "등록일자",
@@ -283,8 +370,27 @@ function downloadExcel(filename: string, records: ReturnRecord[]) {
     { wch: 16 },
   ];
 
+  const notionHeaders = ["처리일", "제품명", "처리결과", "처리수량"];
+  const notionRows = buildNotionProcessRows(records);
+  const notionWorksheet = XLSX.utils.aoa_to_sheet([notionHeaders, ...notionRows]);
+
+  notionWorksheet["!autofilter"] = {
+    ref: XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: notionRows.length, c: notionHeaders.length - 1 },
+    }),
+  };
+
+  notionWorksheet["!cols"] = [
+    { wch: 18 },
+    { wch: 34 },
+    { wch: 14 },
+    { wch: 10 },
+  ];
+
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "반품검사기록");
+  XLSX.utils.book_append_sheet(workbook, notionWorksheet, "노션_처리현황");
   XLSX.writeFile(workbook, filename);
 }
 

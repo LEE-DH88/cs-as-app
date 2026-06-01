@@ -10,7 +10,7 @@ import {
   Search,
   Trash2,
   Upload,
-  User,ㅐㄱ
+  User,
   AlertTriangle,
   CheckCircle2,
   XCircle,

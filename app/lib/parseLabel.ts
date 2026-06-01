@@ -8,7 +8,10 @@ export function parseLabelText(text: string) {
   const orderNumbers = extractOrderNumbers(normalized, memo);
   const orderNumber = orderNumbers[0] || "";
   const productName = extractProductName(normalized, memo);
-  const customerName = extractCustomerName(text);
+
+  // 원본 OCR + 보정된 OCR을 같이 사용해서 고객명 추출률 보강
+  const customerName = extractCustomerName(`${normalized}\n${text}`);
+
   const address = extractAddress(normalized);
 
   return {
@@ -93,11 +96,11 @@ function normalizeText(text: string) {
 }
 
 function extractTrackingNumber(text: string) {
-  // 예: 5737-1043-3181
+  // 예: 5737-4457-2796
   const hyphenMatch = text.match(/\b\d{4}-\d{4}-\d{4}\b/);
   if (hyphenMatch) return hyphenMatch[0];
 
-  // 예: 573710433181
+  // 예: 573744572796
   const compactMatch = text.match(/\b\d{12}\b/);
   if (compactMatch) {
     const num = compactMatch[0];
@@ -121,7 +124,7 @@ function extractReturnMemo(text: string) {
   // ★변심반품 링크맘 엄감★C2026021834143301 / 분유쉐이커
   // ★변심반품 링크맘 엄감★20260521-0001178 / 20260519-0000797 / 휴대용분유포트
   // ★불량교환★20260517-0000592 / 분리형 휴대용분유포트
-  // ★불량교환★2026052160689381 / (분리형) 휴대용분유포트
+  // ★변심반품 링크맘 엄감★2026051689680791 / 분리형 휴대용분유포트
   const starMemoMatch = text.match(
     /★[^★]*(일반반품|변심반품|불량반품|불량교환|AS|검수)[^★]*★\s*[0-9A-Za-z가-힣\-_/() ]{5,}/
   );
@@ -166,6 +169,10 @@ function extractReturnType(text: string) {
   return "";
 }
 
+function extractOrderNumber(text: string, memo: string) {
+  return extractOrderNumbers(text, memo)[0] || "";
+}
+
 function extractOrderNumbers(text: string, memo: string) {
   const results: string[] = [];
 
@@ -183,7 +190,6 @@ function extractOrderNumbers(text: string, memo: string) {
   // OCR에서 숫자 사이에 공백이 들어간 경우 대비
   const compactText = text.replace(/\s+/g, "");
   const compactMemo = memo.replace(/\s+/g, "");
-
   const compactTargets = [compactMemo, compactText].filter(Boolean);
 
   for (const target of compactTargets) {
@@ -191,10 +197,6 @@ function extractOrderNumbers(text: string, memo: string) {
   }
 
   return results;
-}
-
-function extractOrderNumber(text: string, memo: string) {
-  return extractOrderNumbers(text, memo)[0] || "";
 }
 
 function cleanOrderNumber(value: string, allowShort = false) {
@@ -207,18 +209,18 @@ function cleanOrderNumber(value: string, allowShort = false) {
   // 예: C2026021834143301
   if (/^C20\d{8,}$/.test(cleaned)) return cleaned;
 
-  // 예: 20260123-0002995
+  // 예: 20260517-0000592
   if (/^20\d{6}-\d{3,}$/.test(cleaned)) return cleaned;
 
-  // 예: 2026041325853071
+  // 예: 2026051689680791
   if (/^20\d{11,}$/.test(cleaned)) return cleaned;
 
-  // 예: OCR이 하이픈을 빼고 읽은 202601230002995
+  // 예: OCR이 하이픈을 빼고 읽은 202605170000592
   if (/^20\d{13,}$/.test(cleaned)) return cleaned;
 
   // 예: 2026052339
   // 짧은 주문번호는 반품유형/링크맘/별표 근처에서 잡힌 경우에만 허용
-  if (allowShort && /^20\d{8,10}$/.test(cleaned)) return cleaned;
+  if (allowShort && /^20\d{8,18}$/.test(cleaned)) return cleaned;
 
   return "";
 }
@@ -233,13 +235,14 @@ function findOrderNumbersInText(target: string) {
     }
   };
 
-  const labelPattern =
-    "(?:주문\\s*번호|주문번호|주문\\s*NO|주문NO|주문\\s*No|주문\\s*no|주문\\s*N0|주문N0|주문\\s*넘버|주문|ORDER\\s*NO|ORDER\\s*NUMBER|ORDER|오더\\s*번호|오더)";
+  const compactTarget = target.replace(/\s+/g, "");
 
-  // 1순위: "주문번호 / 주문 NO / ORDER" 같은 라벨이 직접 있는 경우
-  // 숫자 사이에 공백이 끼는 OCR까지 허용
+  const labelPattern =
+    "(?:주문\\s*번호|주문번호|주문\\s*NO|주문NO|주문\\s*No|주문\\s*no|주문\\s*N0|주문N0|주문|ORDER\\s*NO|ORDER\\s*NUMBER|ORDER|오더\\s*번호|오더)";
+
+  // 1순위: 주문번호 라벨 뒤
   const labeledOrderMatches = target.matchAll(
-    new RegExp(`${labelPattern}[^0-9C]{0,20}([C]?[0-9][0-9\\s-]{7,30})`, "gi")
+    new RegExp(`${labelPattern}[^0-9C]{0,40}([C]?[0-9][0-9\\s\\-]{7,35})`, "gi")
   );
 
   for (const match of labeledOrderMatches) {
@@ -247,10 +250,8 @@ function findOrderNumbersInText(target: string) {
   }
 
   // 2순위: 배송메모 별표 뒤 주문번호
-  // 예: ★변심반품 링크맘 엄감★C2026021834143301
-  // 예: ★불량반품★20260123-0002995 / 제품명 / 증상
   const starOrderMatches = target.matchAll(
-    /★[^★]*(?:일반반품|변심반품|불량반품|불량교환|AS|검수)[^★]*★[^0-9C]{0,20}([C]?[0-9][0-9\s-]{7,30})/gi
+    /★[^★]*(?:일반반품|변심반품|불량반품|불량교환|AS|검수)[^★]*★[^0-9C]{0,40}([C]?[0-9][0-9\s-]{7,35})/gi
   );
 
   for (const match of starOrderMatches) {
@@ -258,10 +259,8 @@ function findOrderNumbersInText(target: string) {
   }
 
   // 3순위: 반품유형 글자 뒤에 바로 나오는 주문번호
-  // 예: 변심반품 링크맘 엄감 2026041325853071
-  // 예: 불량교환 20260123-0002995 / 제품명 / 증상
   const returnTypeOrderMatches = target.matchAll(
-    /(?:일반반품|변심반품|불량반품|불량교환|AS|검수)[^0-9C]{0,80}([C]?[0-9][0-9\s-]{7,30})/gi
+    /(?:일반반품|변심반품|불량반품|불량교환|AS|검수)[^0-9C]{0,120}([C]?[0-9][0-9\s-]{7,35})/gi
   );
 
   for (const match of returnTypeOrderMatches) {
@@ -270,45 +269,74 @@ function findOrderNumbersInText(target: string) {
 
   // 4순위: 링크맘 엄감 뒤에 나오는 주문번호
   const linkmomOrderMatches = target.matchAll(
-    /링크맘\s*엄감[^0-9C]{0,80}([C]?[0-9][0-9\s-]{7,30})/gi
+    /링크맘\s*엄감[^0-9C]{0,120}([C]?[0-9][0-9\s-]{7,35})/gi
   );
 
   for (const match of linkmomOrderMatches) {
     add(match[1], true);
   }
 
-  // 5순위: C로 시작하는 쿠팡 주문번호
-  // 예: C2026021834143301
+  // 5순위: 반품/제품명 근처 긴 숫자 주문번호
+  const contextualLongMatches = target.matchAll(
+    /(?:일반반품|변심반품|불량반품|불량교환|링크맘|엄감|분리형|휴대용|분유포트|분유쉐이커|LED)[^0-9]{0,160}(20\d{8,18})/g
+  );
+
+  for (const match of contextualLongMatches) {
+    add(match[1], true);
+  }
+
+  // 6순위: C로 시작하는 쿠팡 주문번호
   const coupangOrderMatches = target.matchAll(/\bC\s*20[0-9\s-]{8,25}\b/gi);
 
   for (const match of coupangOrderMatches) {
     add(match[0], false);
   }
 
-  // 6순위: 예: 20260123-0002995
+  // 7순위: 20260517-0000592
   const dashOrderMatches = target.matchAll(/\b20\d{6}\s*-\s*\d{3,}\b/g);
 
   for (const match of dashOrderMatches) {
     add(match[0], false);
   }
 
-  // 7순위: 예: 2026041325853071
-  // 송장번호 12자리와 헷갈리지 않게 13자리 이상만 일반 주문번호로 인정
-  const longOrderMatches = target.matchAll(/\b20\d{11,}\b/g);
+  // 8순위: 2026051689680791 같은 긴 숫자 주문번호
+  const longOrderMatches = target.matchAll(/\b20\d{8,18}\b/g);
 
   for (const match of longOrderMatches) {
-    add(match[0], false);
+    const around = getAroundText(target, match.index || 0, 100);
+
+    // 날짜, 전화번호, 송장번호 오인식 방지
+    // 주변에 반품/제품/링크맘/엄감이 있으면 주문번호로 인정
+    if (
+      /(일반반품|변심반품|불량반품|불량교환|AS|검수|링크맘|엄감|분리형|휴대용|분유포트|분유쉐이커|LED)/.test(
+        around
+      )
+    ) {
+      add(match[0], true);
+    }
   }
 
-  // 8순위: 숫자 사이에 공백이 낀 긴 주문번호
-  // 예: 2 0 2 6 0 4 1 3 2 5 8 5 3 0 7 1
-  const spacedLongOrderMatches = target.matchAll(/\b2\s*0(?:\s*\d){11,20}\b/g);
+  // 9순위: 숫자 사이에 공백이 낀 긴 주문번호
+  const spacedLongOrderMatches = target.matchAll(/\b2\s*0(?:\s*\d){8,18}\b/g);
 
   for (const match of spacedLongOrderMatches) {
-    add(match[0], false);
+    add(match[0], true);
+  }
+
+  // 10순위: 공백 제거 버전에서도 한 번 더
+  const compactLongMatches = compactTarget.matchAll(/20\d{8,18}/g);
+
+  for (const match of compactLongMatches) {
+    add(match[0], true);
   }
 
   return found;
+}
+
+function getAroundText(text: string, index: number, size = 100) {
+  const start = Math.max(0, index - size);
+  const end = Math.min(text.length, index + size);
+  return text.slice(start, end);
 }
 
 function extractProductName(text: string, memo: string) {
@@ -329,9 +357,7 @@ function extractProductName(text: string, memo: string) {
     compact.includes("분리형분유") ||
     compact.includes("분리형포트");
 
-  // 중요:
-  // OCR 원문에 "분리형" 계열 글자가 보이면
-  // 다른 제품명보다 무조건 먼저 "(분리형) 휴대용분유포트"로 분류함.
+  // OCR 원문에 "분리형" 계열 글자가 보이면 우선 분리형으로 분류
   if (hasSeparateKeyword) {
     return "(분리형) 휴대용분유포트";
   }
@@ -356,7 +382,6 @@ function extractProductName(text: string, memo: string) {
     compact.includes("쉐이커") ||
     compact.includes("셰이커")
   ) {
-    // page.tsx의 제품 선택값이 "분유쉐이커"라면 아래 값을 "분유쉐이커"로 바꾸면 됨.
     return "[꿈비] 분유쉐이커";
   }
 
@@ -495,8 +520,18 @@ function extractCustomerName(text: string) {
     }
   }
 
-  // 2순위: "받는분"은 회사 주소일 가능성이 높으므로 직접 우선하지 않고,
-  // 주소 바로 위/아래 줄에서 찾기
+  // 2순위: 한 줄 OCR에서 "보내분 ... 고객명" 구조 직접 추출
+  const senderAreaMatches = text.matchAll(
+    /(보내분|보내는분|보낸분|보내)[가-힣0-9A-Za-z\s\-().,*]{0,120}/g
+  );
+
+  for (const match of senderAreaMatches) {
+    const area = match[0];
+    const name = findBestNameCandidate(area, blacklist);
+    if (name) return name;
+  }
+
+  // 3순위: 주소 바로 위/아래 줄에서 찾기
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
@@ -515,7 +550,7 @@ function extractCustomerName(text: string) {
     }
   }
 
-  // 3순위: 전체 텍스트에서 마스킹 이름 찾기
+  // 4순위: 전체 텍스트에서 마스킹 이름 찾기
   const maskedPatterns = [
     /[가-힣]\*{1,2}[가-힣]/g, // 김*정, 이**영
     /[가-힣]\*{1,2}/g, // 김**, 이*
@@ -533,7 +568,7 @@ function extractCustomerName(text: string) {
     }
   }
 
-  // 4순위: 일반 한글 이름 후보
+  // 5순위: 일반 한글 이름 후보
   const normalName = findBestNameCandidate(text, blacklist);
   if (normalName) return normalName;
 
@@ -606,6 +641,10 @@ function isValidNameCandidate(name: string, blacklist: string[]) {
     "금강로",
     "방안로",
     "테리로",
+    "백범로",
+    "마포구",
+    "성동구",
+    "시청대로",
     "운송장",
     "송장번호",
     "예약번호",

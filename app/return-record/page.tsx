@@ -11,7 +11,6 @@ import {
   Trash2,
   Upload,
   User,
-  FileText,
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -512,10 +511,14 @@ export default function ReturnRecordApp() {
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
   const [uploadingProduct, setUploadingProduct] = useState(false);
 
+  const [isRecordSearchOpen, setIsRecordSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [searchDate, setSearchDate] = useState("");
+  const [searchStartDate, setSearchStartDate] = useState("");
+  const [searchEndDate, setSearchEndDate] = useState("");
   const [filterProduct, setFilterProduct] = useState<string>("전체");
   const [filterResult, setFilterResult] = useState<string>("전체");
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [statusError, setStatusError] = useState<string>("");
@@ -585,6 +588,8 @@ export default function ReturnRecordApp() {
 
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
+      const recordDate = getDateOnly(record.createdAt);
+
       const matchesSearch =
         !searchTerm ||
         [
@@ -601,8 +606,11 @@ export default function ReturnRecordApp() {
           .toLowerCase()
           .includes(searchTerm.toLowerCase());
 
-      const matchesDate =
-        !searchDate || getDateOnly(record.createdAt) === searchDate;
+      const matchesStartDate =
+        !searchStartDate || (recordDate && recordDate >= searchStartDate);
+
+      const matchesEndDate =
+        !searchEndDate || (recordDate && recordDate <= searchEndDate);
 
       const matchesProduct =
         filterProduct === "전체" || record.productName === filterProduct;
@@ -610,9 +618,51 @@ export default function ReturnRecordApp() {
       const matchesResult =
         filterResult === "전체" || record.inspectionResult === filterResult;
 
-      return matchesSearch && matchesDate && matchesProduct && matchesResult;
+      return (
+        matchesSearch &&
+        matchesStartDate &&
+        matchesEndDate &&
+        matchesProduct &&
+        matchesResult
+      );
     });
-  }, [records, searchTerm, searchDate, filterProduct, filterResult]);
+  }, [
+    records,
+    searchTerm,
+    searchStartDate,
+    searchEndDate,
+    filterProduct,
+    filterResult,
+  ]);
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredRecords.map((record) => record.id));
+    setSelectedRecordIds((prev) =>
+      prev.filter((recordId) => visibleIds.has(recordId))
+    );
+  }, [filteredRecords]);
+
+  const isAllFilteredRecordsSelected =
+    filteredRecords.length > 0 &&
+    filteredRecords.every((record) => selectedRecordIds.includes(record.id));
+
+  function toggleSelectAllFilteredRecords() {
+    if (isAllFilteredRecordsSelected) {
+      setSelectedRecordIds([]);
+      return;
+    }
+
+    setSelectedRecordIds(filteredRecords.map((record) => record.id));
+  }
+
+  function toggleSelectRecord(recordId: string) {
+    setSelectedRecordIds((prev) =>
+      prev.includes(recordId)
+        ? prev.filter((id) => id !== recordId)
+        : [...prev, recordId]
+    );
+  }
+
 
   function resetForm() {
     setInvoiceNumber("");
@@ -1069,6 +1119,28 @@ export default function ReturnRecordApp() {
     }
   }
 
+  async function deleteRecordWithoutConfirm(record: ReturnRecord) {
+    const response = await fetch("/api/records", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: record.id,
+        photoUrls: [
+          ...record.invoicePhotos.map((photo) => photo.url),
+          ...record.productPhotos.map((photo) => photo.url),
+        ],
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data?.error || "기록 삭제에 실패했습니다.");
+    }
+  }
+
   async function handleDeleteRecord(record: ReturnRecord) {
     const confirmed = window.confirm(
       "삭제하시겠습니까?\n기록과 연결된 사진도 함께 삭제됩니다."
@@ -1080,27 +1152,9 @@ export default function ReturnRecordApp() {
       setStatusError("");
       setStatusMessage("기록과 사진을 함께 삭제 중입니다...");
 
-      const response = await fetch("/api/records", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id: record.id,
-          photoUrls: [
-            ...record.invoicePhotos.map((photo) => photo.url),
-            ...record.productPhotos.map((photo) => photo.url),
-          ],
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "기록 삭제에 실패했습니다.");
-      }
-
+      await deleteRecordWithoutConfirm(record);
       await fetchRecords();
+      setSelectedRecordIds((prev) => prev.filter((id) => id !== record.id));
       setStatusMessage("기록과 연결 사진이 함께 삭제되었습니다.");
     } catch (error) {
       setStatusError(
@@ -1110,6 +1164,44 @@ export default function ReturnRecordApp() {
       setDeletingId(null);
     }
   }
+
+  async function handleDeleteSelectedRecords() {
+    if (selectedRecordIds.length === 0) {
+      setStatusError("삭제할 기록을 선택해주세요.");
+      setStatusMessage("");
+      return;
+    }
+
+    const selectedRecords = filteredRecords.filter((record) =>
+      selectedRecordIds.includes(record.id)
+    );
+
+    const confirmed = window.confirm(
+      `선택한 기록 ${selectedRecords.length}개를 삭제하시겠습니까?\n기록과 연결된 사진도 함께 삭제됩니다.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setBulkDeleting(true);
+      setStatusError("");
+      setStatusMessage("선택한 기록과 사진을 함께 삭제 중입니다...");
+
+      for (const record of selectedRecords) {
+        await deleteRecordWithoutConfirm(record);
+      }
+
+      await fetchRecords();
+      setSelectedRecordIds([]);
+      setStatusMessage(`선택한 기록 ${selectedRecords.length}개가 삭제되었습니다.`);
+    } catch (error) {
+      setStatusError(
+        error instanceof Error ? error.message : "선택 삭제 중 오류가 발생했습니다."
+      );
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
 
   function handleDownloadExcel() {
     if (filteredRecords.length === 0) {
@@ -1240,7 +1332,7 @@ export default function ReturnRecordApp() {
           </Card>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+        <div className="grid gap-6">
           <Card className="rounded-3xl shadow-sm">
             <CardHeader>
               <CardTitle className="text-2xl">
@@ -1660,156 +1752,172 @@ export default function ReturnRecordApp() {
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
-            <Card className="rounded-3xl shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-2xl">운영 가이드</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-3xl border bg-slate-50 p-5">
-                  <ol className="space-y-3 text-sm leading-6 text-slate-700">
-                    <li>1. 반품 입고 후 송장 사진 기준으로 먼저 등록합니다.</li>
-                    <li>2. 주문번호, 고객명은 확인 가능한 범위만 입력해도 됩니다.</li>
-                    <li>3. 검사 전에는 ‘검사 대기’로 저장해두고, 판정 후 수정이 필요하면 재등록 기준으로 운영합니다.</li>
-                    <li>4. 제품 사진은 외관, 침수 흔적, 불량 흔적 위주로 남기면 됩니다.</li>
-                    <li>5. 삭제 시 기록과 연결된 사진이 함께 삭제됩니다.</li>
-                  </ol>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-2xl">실사용 기준 요약</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-3xl border bg-slate-50 p-5">
-                  <div className="mb-2 flex items-center gap-2 text-base font-semibold">
-                    <Smartphone className="h-5 w-5" />
-                    PC/휴대폰 동시 조회
-                  </div>
-                  <p className="text-sm leading-6 text-slate-700">
-                    브라우저 로컬 저장이 아니라 서버 저장 방식이라서,
-                    사무실 PC에서 등록한 기록을 휴대폰에서도 그대로 확인할 수 있습니다.
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border bg-slate-50 p-5">
-                  <div className="mb-2 flex items-center gap-2 text-base font-semibold">
-                    <Camera className="h-5 w-5" />
-                    사진 용량 낭비 최소화
-                  </div>
-                  <p className="text-sm leading-6 text-slate-700">
-                    업로드 전에 자동 압축 처리되고, 송장 2장 / 제품 4장 제한을 둬서
-                    저장공간이 불필요하게 빠르게 차지 않도록 구성했습니다.
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border bg-slate-50 p-5">
-                  <div className="mb-2 flex items-center gap-2 text-base font-semibold">
-                    <Search className="h-5 w-5" />
-                    검색 실사용성 강화
-                  </div>
-                  <p className="text-sm leading-6 text-slate-700">
-                    송장번호, 주문번호, 고객명, 반품유형, 제품명, 검사결과, 비고까지 한 번에 검색되므로
-                    나중에 역추적하거나 공유할 때 찾기 편합니다.
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border bg-slate-50 p-5">
-                  <div className="mb-2 flex items-center gap-2 text-base font-semibold">
-                    <FileText className="h-5 w-5" />
-                    보고용 엑셀 바로 추출
-                  </div>
-                  <p className="text-sm leading-6 text-slate-700">
-                    등록일자, 송장번호, 주문번호, 고객명, 반품유형, 제품명,
-                    검사결과, 비고 항목으로 내려받을 수 있게 맞춰두었습니다.
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border bg-amber-50 p-5">
-                  <div className="mb-2 flex items-center gap-2 text-base font-semibold text-amber-900">
-                    <AlertTriangle className="h-5 w-5" />
-                    추천 운영 방식
-                  </div>
-                  <p className="text-sm leading-6 text-amber-900">
-                    검사 전 입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 엑셀 공유
-                    흐름으로 쓰는 게 가장 실무에 맞습니다.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </div>
 
-        <Card className="mt-6 rounded-3xl shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-2xl">기록 조회</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid gap-3 md:grid-cols-[0.9fr_1.5fr_0.8fr_0.8fr_auto]">
-              <div className="flex gap-2">
-                <Input
-                  type="date"
-                  value={searchDate}
-                  onChange={(e) => setSearchDate(e.target.value)}
-                  className="rounded-2xl"
-                />
+        <Card className="mt-6 overflow-hidden rounded-3xl border-slate-200 bg-white/95 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setIsRecordSearchOpen((prev) => !prev)}
+            className="flex w-full flex-col gap-4 p-6 text-left transition hover:bg-slate-50 md:flex-row md:items-center md:justify-between"
+          >
+            <div>
+              <p className="text-sm font-semibold text-slate-500">기록 관리</p>
+              <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
+                기록 조회 및 삭제
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                평소에는 접어두고, 필요한 날짜만 펼쳐서 조회하거나 선택 삭제할 수 있습니다.
+              </p>
+            </div>
 
-                {searchDate && (
+            <div className="flex items-center gap-3">
+              <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+                조회 결과 {filteredRecords.length}건
+              </span>
+              <span className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
+                {isRecordSearchOpen ? "접기 ▲" : "열기 ▼"}
+              </span>
+            </div>
+          </button>
+
+          {isRecordSearchOpen && (
+            <CardContent className="space-y-5 border-t border-slate-100 pt-6">
+            <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-4">
+              <div className="grid gap-3 md:grid-cols-[0.9fr_0.9fr_1.5fr_0.8fr_0.8fr_auto]">
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-slate-500">조회 시작일</Label>
+                  <Input
+                    type="date"
+                    value={searchStartDate}
+                    onChange={(e) => setSearchStartDate(e.target.value)}
+                    className="rounded-2xl bg-white"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-slate-500">조회 종료일</Label>
+                  <Input
+                    type="date"
+                    value={searchEndDate}
+                    onChange={(e) => setSearchEndDate(e.target.value)}
+                    className="rounded-2xl bg-white"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-slate-500">통합 검색</Label>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="송장번호, 주문번호, 고객명, 제품명, 비고 검색"
+                      className="rounded-2xl bg-white pl-9"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-slate-500">제품</Label>
+                  <Select value={filterProduct} onValueChange={setFilterProduct}>
+                    <SelectTrigger className="rounded-2xl bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="전체">전체 제품</SelectItem>
+                      {productFilterOptions.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-slate-500">결과</Label>
+                  <Select value={filterResult} onValueChange={setFilterResult}>
+                    <SelectTrigger className="rounded-2xl bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="전체">전체 결과</SelectItem>
+                      {RESULT_TYPES.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-end gap-2">
                   <Button
                     type="button"
                     variant="outline"
-                    className="rounded-2xl px-3"
-                    onClick={() => setSearchDate("")}
+                    className="rounded-2xl bg-white"
+                    onClick={() => {
+                      setSearchStartDate("");
+                      setSearchEndDate("");
+                      setSearchTerm("");
+                      setFilterProduct("전체");
+                      setFilterResult("전체");
+                      setSelectedRecordIds([]);
+                    }}
                   >
                     전체
                   </Button>
-                )}
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-2xl bg-white"
+                    onClick={fetchRecords}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    새로고침
+                  </Button>
+                </div>
               </div>
 
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="송장번호, 주문번호, 고객명, 반품유형, 제품명, 결과, 비고 검색"
-                  className="rounded-2xl pl-9"
-                />
+              <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:flex-row md:items-center md:justify-between">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={isAllFilteredRecordsSelected}
+                    onChange={toggleSelectAllFilteredRecords}
+                    disabled={filteredRecords.length === 0 || bulkDeleting}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  조회 결과 전체선택
+                </label>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-sm text-slate-500">
+                    조회 {filteredRecords.length}건 / 선택 {selectedRecordIds.length}건
+                  </span>
+
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="rounded-2xl"
+                    onClick={handleDeleteSelectedRecords}
+                    disabled={selectedRecordIds.length === 0 || bulkDeleting}
+                  >
+                    {bulkDeleting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        삭제 중...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        선택삭제
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
-
-              <Select value={filterProduct} onValueChange={setFilterProduct}>
-                <SelectTrigger className="rounded-2xl">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="전체">전체 제품</SelectItem>
-                  {productFilterOptions.map((item) => (
-                    <SelectItem key={item} value={item}>
-                      {item}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={filterResult} onValueChange={setFilterResult}>
-                <SelectTrigger className="rounded-2xl">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="전체">전체 결과</SelectItem>
-                  {RESULT_TYPES.map((item) => (
-                    <SelectItem key={item} value={item}>
-                      {item}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Button variant="outline" className="rounded-2xl" onClick={fetchRecords}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                새로고침
-              </Button>
             </div>
 
             {loadingRecords ? (
@@ -1831,7 +1939,18 @@ export default function ReturnRecordApp() {
                     <Card key={record.id} className="rounded-3xl border shadow-none">
                       <CardContent className="p-5">
                         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div>
+                          <div className="space-y-3">
+                            <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={selectedRecordIds.includes(record.id)}
+                                onChange={() => toggleSelectRecord(record.id)}
+                                disabled={bulkDeleting}
+                                className="h-4 w-4 rounded border-slate-300"
+                              />
+                              선택
+                            </label>
+
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                                 {isInlineEditing
@@ -1868,7 +1987,7 @@ export default function ReturnRecordApp() {
                                   type="button"
                                   className="rounded-2xl"
                                   onClick={() => handleSaveInlineRecord(record)}
-                                  disabled={inlineSavingId === record.id}
+                                  disabled={inlineSavingId === record.id || bulkDeleting}
                                 >
                                   {inlineSavingId === record.id ? (
                                     <>
@@ -1906,7 +2025,9 @@ export default function ReturnRecordApp() {
                               className="rounded-2xl"
                               onClick={() => handleDeleteRecord(record)}
                               disabled={
-                                deletingId === record.id || inlineSavingId === record.id
+                                deletingId === record.id ||
+                                inlineSavingId === record.id ||
+                                bulkDeleting
                               }
                             >
                               {deletingId === record.id ? (
@@ -2247,7 +2368,100 @@ export default function ReturnRecordApp() {
               </div>
             )}
           </CardContent>
+          )}
         </Card>
+
+        <div className="mt-6 grid gap-4 xl:grid-cols-2">
+          <Card className="rounded-3xl border-slate-200 bg-white/90 shadow-sm">
+            <CardContent className="p-0">
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center justify-between p-6">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-500">하단 안내</p>
+                    <h2 className="mt-1 text-xl font-bold text-slate-900">운영 가이드</h2>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 group-open:hidden">
+                    열기 ▼
+                  </span>
+                  <span className="hidden rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white group-open:inline-block">
+                    접기 ▲
+                  </span>
+                </summary>
+
+                <div className="border-t border-slate-100 p-6 pt-5">
+                  <ol className="space-y-3 rounded-3xl border bg-slate-50 p-5 text-sm leading-6 text-slate-700">
+                    <li>1. 반품 입고 후 송장 사진 기준으로 먼저 등록합니다.</li>
+                    <li>2. 주문번호, 고객명은 확인 가능한 범위만 입력해도 됩니다.</li>
+                    <li>3. 검사 전에는 ‘검사 대기’로 저장해두고, 판정 후에는 기록 조회에서 바로 수정합니다.</li>
+                    <li>4. 제품 사진은 외관, 침수 흔적, 불량 흔적 위주로 남기면 됩니다.</li>
+                    <li>5. 삭제 시 기록과 연결된 사진이 함께 삭제됩니다.</li>
+                  </ol>
+                </div>
+              </details>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl border-slate-200 bg-white/90 shadow-sm">
+            <CardContent className="p-0">
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center justify-between p-6">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-500">하단 안내</p>
+                    <h2 className="mt-1 text-xl font-bold text-slate-900">실사용 기준 요약</h2>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 group-open:hidden">
+                    열기 ▼
+                  </span>
+                  <span className="hidden rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white group-open:inline-block">
+                    접기 ▲
+                  </span>
+                </summary>
+
+                <div className="grid gap-4 border-t border-slate-100 p-6 pt-5 md:grid-cols-2">
+                  <div className="rounded-3xl border bg-slate-50 p-5">
+                    <div className="mb-2 flex items-center gap-2 text-base font-semibold">
+                      <Smartphone className="h-5 w-5" />
+                      PC/휴대폰 동시 조회
+                    </div>
+                    <p className="text-sm leading-6 text-slate-700">
+                      서버 저장 방식이라 사무실 PC에서 등록한 기록을 휴대폰에서도 그대로 확인할 수 있습니다.
+                    </p>
+                  </div>
+
+                  <div className="rounded-3xl border bg-slate-50 p-5">
+                    <div className="mb-2 flex items-center gap-2 text-base font-semibold">
+                      <Camera className="h-5 w-5" />
+                      사진 용량 낭비 최소화
+                    </div>
+                    <p className="text-sm leading-6 text-slate-700">
+                      업로드 전에 자동 압축 처리되고, 송장 2장 / 제품 4장 제한으로 저장공간 사용량을 줄입니다.
+                    </p>
+                  </div>
+
+                  <div className="rounded-3xl border bg-slate-50 p-5">
+                    <div className="mb-2 flex items-center gap-2 text-base font-semibold">
+                      <Search className="h-5 w-5" />
+                      날짜 범위 조회
+                    </div>
+                    <p className="text-sm leading-6 text-slate-700">
+                      하루만 볼 때는 시작일과 종료일을 같은 날짜로 넣으면 됩니다.
+                    </p>
+                  </div>
+
+                  <div className="rounded-3xl border bg-amber-50 p-5">
+                    <div className="mb-2 flex items-center gap-2 text-base font-semibold text-amber-900">
+                      <AlertTriangle className="h-5 w-5" />
+                      추천 운영 방식
+                    </div>
+                    <p className="text-sm leading-6 text-amber-900">
+                      입고 즉시 1차 등록 → 판정 후 검사결과/비고 보완 → 필요 시 엑셀 공유 흐름으로 쓰면 됩니다.
+                    </p>
+                  </div>
+                </div>
+              </details>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

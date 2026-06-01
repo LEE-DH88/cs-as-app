@@ -10,7 +10,7 @@ import {
   Search,
   Trash2,
   Upload,
-  User,
+  User,ㅐㄱ
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -699,7 +699,25 @@ export default function ReturnRecordApp() {
   }
 
   function detectReturnType(parsed: OcrParsedResult) {
-    const text = `${parsed.returnType || ""} ${parsed.rawText || ""}`.toUpperCase();
+    const text = `${parsed.returnType || ""} ${parsed.rawText || ""}`
+      .replace(/\s+/g, "")
+      .toUpperCase();
+
+    if (text.includes("불량교환")) {
+      return "불량교환" as ReturnType;
+    }
+
+    if (text.includes("불량반품")) {
+      return "불량반품" as ReturnType;
+    }
+
+    if (text.includes("변심반품")) {
+      return "변심반품" as ReturnType;
+    }
+
+    if (text.includes("일반반품")) {
+      return "일반반품" as ReturnType;
+    }
 
     if (/\bA\s*\/?\s*S\b|AS|에이에스|수리/.test(text)) {
       return "AS" as ReturnType;
@@ -716,21 +734,205 @@ export default function ReturnRecordApp() {
     return null;
   }
 
+  function cleanOcrText(value?: string) {
+    return (value || "")
+      .replace(/\r/g, "\n")
+      .replace(/[|｜]/g, " ")
+      .replace(/[★☆]/g, " ★ ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function compactOcrText(value?: string) {
+    return (value || "").replace(/\s+/g, "");
+  }
+
+  function isLikelyOrderNumberCandidate(candidate: string, context: string) {
+    const cleanCandidate = candidate.replace(/\s+/g, "").replace(/[.,;:)]$/g, "");
+    const onlyDigits = cleanCandidate.replace(/^C/i, "").replace(/-/g, "");
+
+    if (!/^C?20\d{7,16}$/i.test(onlyDigits.startsWith("20") ? onlyDigits : cleanCandidate.replace(/-/g, ""))) {
+      if (!/^C20\d{12,16}$/i.test(cleanCandidate.replace(/-/g, ""))) return false;
+    }
+
+    if (onlyDigits.length < 10 || onlyDigits.length > 17) return false;
+    if (/^(050|010|011|016|017|018|019)/.test(onlyDigits)) return false;
+    if (/^5737/.test(onlyDigits)) return false;
+    if (/^20\d{6}(0\d|1\d|2[0-3])$/.test(onlyDigits)) return false;
+
+    const badContext =
+      /운송장번호|송장번호|예약번호|예악번호|접수일자|운임TYPE|운임TYPE|수량|발지|전화|고객센터|1588|1644/i;
+
+    if (badContext.test(context) && !/일반반품|변심반품|불량반품|불량교환|링크맘|엄감|분리형|분유|포트|쉐이커/i.test(context)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function extractOrderNumberFromRawText(rawText?: string) {
+    const raw = cleanOcrText(rawText);
+    if (!raw) return "";
+
+    const candidates: { value: string; score: number }[] = [];
+    const patterns = [
+      /C\s*20\d[\d\s-]{8,18}/gi,
+      /20\d{6}\s*-\s*\d{4,8}/g,
+      /20\d[\d\s]{7,16}/g,
+    ];
+
+    patterns.forEach((pattern) => {
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(raw)) !== null) {
+        const value = match[0].replace(/\s+/g, "").replace(/[.,;:)]$/g, "");
+        const start = Math.max(0, match.index - 45);
+        const end = Math.min(raw.length, match.index + match[0].length + 45);
+        const context = raw.slice(start, end);
+        const digits = value.replace(/^C/i, "").replace(/-/g, "");
+
+        if (!isLikelyOrderNumberCandidate(value, context)) continue;
+
+        let score = digits.length;
+        if (/일반반품|변심반품|불량반품|불량교환|링크맘|엄감|상품|교환/i.test(context)) score += 80;
+        if (/분리형|휴대용|분유포트|분유쉐이커|쉐이커|LED/i.test(context)) score += 40;
+        if (/^C/i.test(value)) score += 25;
+        if (/주문번호/i.test(context)) score += 20;
+        if (/예약번호|접수일자|운송장번호|5737|0507|050-|1588|1644/i.test(context)) score -= 60;
+
+        candidates.push({ value, score });
+      }
+    });
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0]?.value || "";
+  }
+
+  function isValidCustomerNameCandidate(name: string) {
+    const blacklist = [
+      "박승훈",
+      "착지신용",
+      "이지어드민",
+      "주식회사",
+      "꿈비",
+      "한진택배",
+      "회수상품",
+      "운송장",
+      "주문번호",
+      "예약번호",
+      "받는분",
+      "보내는분",
+      "안성시",
+      "고삼면",
+      "미록로",
+      "봉산리",
+      "링크맘",
+      "엄감",
+      "분리형",
+      "휴대용",
+      "분유포트",
+      "쉐이커",
+    ];
+
+    if (!/^[가-힣]{2,4}$/.test(name)) return false;
+    if (blacklist.some((word) => name.includes(word) || word.includes(name))) return false;
+    return true;
+  }
+
+  function extractCustomerNameFromRawText(rawText?: string) {
+    const raw = cleanOcrText(rawText);
+    if (!raw) return "";
+
+    const senderPatterns = [
+      /(?:보내는분|보낸분|보내는\s*분|발송인|발신인|고객명)\s*[:：]?\s*([가-힣]{2,4})/g,
+      /([가-힣]{2,4})\s*(?:050\d|010\d|050-\d|010-\d)/g,
+    ];
+
+    for (const pattern of senderPatterns) {
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(raw)) !== null) {
+        const name = match[1];
+        if (isValidCustomerNameCandidate(name)) return name;
+      }
+    }
+
+    const candidates: { value: string; score: number }[] = [];
+    const namePattern = /[가-힣]{2,4}/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = namePattern.exec(raw)) !== null) {
+      const value = match[0];
+      if (!isValidCustomerNameCandidate(value)) continue;
+
+      const start = Math.max(0, match.index - 35);
+      const end = Math.min(raw.length, match.index + value.length + 35);
+      const context = raw.slice(start, end);
+
+      let score = 0;
+      if (/보내는분|보낸분|발송인|발신인|고객명/i.test(context)) score += 100;
+      if (/050\d|010\d|050-\d|010-\d/i.test(context)) score += 45;
+      if (/불량교환|불량반품|변심반품|일반반품|분리형|휴대용|분유포트|쉐이커|LED/i.test(context)) score += 30;
+      if (/받는분|안성시|고삼면|링크맘|엄감|주식회사|꿈비/i.test(context)) score -= 70;
+      if (value === "박승훈") score -= 200;
+
+      candidates.push({ value, score });
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0]?.score > 0 ? candidates[0].value : "";
+  }
+
+  function extractProductNameFromRawText(rawText?: string) {
+    const compact = compactOcrText(rawText);
+
+    if (/분리형|분리|휴대용분유포트|휴대용분유|분유포트/.test(compact)) {
+      if (/분리형|분리/.test(compact)) return "(분리형) 휴대용분유포트";
+    }
+
+    if (/LED|엘이디/i.test(rawText || "")) {
+      return "LED분유쉐이커";
+    }
+
+    if (/쉐이커|세이커|분유쉐이커|분유세이커/.test(compact)) {
+      return "분유쉐이커";
+    }
+
+    if (/휴대용|분유포트|보온포트|포트/.test(compact)) {
+      return "휴대용분유포트";
+    }
+
+    return "";
+  }
+
+  function repairOcrParsedResult(parsed: OcrParsedResult) {
+    const rawText = parsed.rawText || "";
+    const orderNumber = parsed.orderNumber || extractOrderNumberFromRawText(rawText);
+    const customerName = parsed.customerName || extractCustomerNameFromRawText(rawText);
+    const productName = parsed.productName || extractProductNameFromRawText(rawText);
+
+    return {
+      ...parsed,
+      orderNumber,
+      customerName,
+      productName,
+    };
+  }
+
   function applyOcrResult(parsed: OcrParsedResult) {
-    const detectedInvoiceNumber = parsed.trackingNumber || parsed.invoiceNumber;
+    const repairedParsed = repairOcrParsedResult(parsed);
+    const detectedInvoiceNumber = repairedParsed.trackingNumber || repairedParsed.invoiceNumber;
 
     if (detectedInvoiceNumber) setInvoiceNumber(detectedInvoiceNumber);
-    if (parsed.orderNumber) setOrderNumber(parsed.orderNumber);
-    if (parsed.customerName) setCustomerName(parsed.customerName);
+    if (repairedParsed.orderNumber) setOrderNumber(repairedParsed.orderNumber);
+    if (repairedParsed.customerName) setCustomerName(repairedParsed.customerName);
 
-    const detectedReturnType = detectReturnType(parsed);
+    const detectedReturnType = detectReturnType(repairedParsed);
     if (detectedReturnType) {
       setReturnType(detectedReturnType);
     }
 
     const normalizedProductName = normalizeProductName(
-      parsed.productName,
-      parsed.rawText
+      repairedParsed.productName,
+      repairedParsed.rawText
     );
 
     if (normalizedProductName) {
@@ -743,7 +945,7 @@ export default function ReturnRecordApp() {
       }
     }
 
-    setOcrRawText(parsed.rawText || "");
+    setOcrRawText(repairedParsed.rawText || "");
   }
 
   async function runInvoiceOcr(file: File) {

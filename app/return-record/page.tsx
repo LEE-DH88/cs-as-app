@@ -16,7 +16,10 @@ import {
   XCircle,
   Clock3,
   Smartphone,
-  Database,
+  Activity,
+  BarChart3,
+  PieChart,
+  TrendingUp,
 } from "lucide-react";
 
 import * as XLSX from "xlsx";
@@ -265,6 +268,55 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function getLocalDateOnly(value: string | Date) {
+  if (!value) return "";
+
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatKoreanDateFromDateKey(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value;
+
+  return `${match[1]}년 ${Number(match[2])}월 ${Number(match[3])}일`;
+}
+
+function getPercent(value: number, total: number) {
+  if (!total) return 0;
+  return Math.round((value / total) * 1000) / 10;
+}
+
+const DEFECT_REASON_KEYWORDS = [
+  "누수",
+  "소음",
+  "전원불량",
+  "충전불량",
+  "회전불량",
+  "수분유입",
+  "이물질",
+  "사용감",
+];
+
+function extractDefectReasons(note: string) {
+  const compactNote = (note || "").replace(/\s+/g, "");
+  const matchedReasons = DEFECT_REASON_KEYWORDS.filter((keyword) =>
+    compactNote.includes(keyword)
+  );
+
+  return matchedReasons.length ? matchedReasons : ["사유 미기재"];
 }
 
 
@@ -635,30 +687,124 @@ export default function ReturnRecordApp() {
     fetchRecords();
   }, []);
 
-  const summary = useMemo(() => {
-    const total = records.length;
-    const normal = records.filter((r) =>
-      isNormalInspectionResult(r.inspectionResult)
-    ).length;
-    const defective = records.filter((r) =>
-      isDefectiveInspectionResult(r.inspectionResult)
-    ).length;
-    const followUp = records.filter((r) => r.inspectionResult === "후속 확인 필요").length;
+  const todayKey = useMemo(() => getLocalDateOnly(new Date()), []);
 
-    const totalPhotoSize = records.reduce((acc, record) => {
-      const invoiceSize = record.invoicePhotos.reduce((s, p) => s + (p.size || 0), 0);
-      const productSize = record.productPhotos.reduce((s, p) => s + (p.size || 0), 0);
-      return acc + invoiceSize + productSize;
-    }, 0);
+  const todayRecords = useMemo(() => {
+    return records.filter((record) => getLocalDateOnly(record.createdAt) === todayKey);
+  }, [records, todayKey]);
+
+  const todayDashboard = useMemo(() => {
+    const total = todayRecords.length;
+    const normal = todayRecords.filter((record) =>
+      isNormalInspectionResult(record.inspectionResult)
+    ).length;
+    const defective = todayRecords.filter((record) =>
+      isDefectiveInspectionResult(record.inspectionResult)
+    ).length;
+    const followUp = todayRecords.filter(
+      (record) => record.inspectionResult === "후속 확인 필요"
+    ).length;
+    const waiting = todayRecords.filter(
+      (record) => normalizeInspectionResult(record.inspectionResult) === "검사 대기"
+    ).length;
+
+    const defectReasonMap = new Map<string, number>();
+    const productDefectMap = new Map<
+      string,
+      { total: number; reasons: Map<string, number> }
+    >();
+
+    todayRecords
+      .filter((record) => isDefectiveInspectionResult(record.inspectionResult))
+      .forEach((record) => {
+        const product = record.productName || "제품명 미기재";
+        const reasons = extractDefectReasons(record.note);
+
+        if (!productDefectMap.has(product)) {
+          productDefectMap.set(product, { total: 0, reasons: new Map() });
+        }
+
+        const productSummary = productDefectMap.get(product);
+        if (productSummary) {
+          productSummary.total += 1;
+        }
+
+        reasons.forEach((reason) => {
+          defectReasonMap.set(reason, (defectReasonMap.get(reason) || 0) + 1);
+
+          if (productSummary) {
+            productSummary.reasons.set(
+              reason,
+              (productSummary.reasons.get(reason) || 0) + 1
+            );
+          }
+        });
+      });
+
+    const resultBars = [
+      {
+        label: "정상확인",
+        count: normal,
+        percent: getPercent(normal, total),
+        barClass: "bg-emerald-500",
+        textClass: "text-emerald-700",
+      },
+      {
+        label: "불량판정",
+        count: defective,
+        percent: getPercent(defective, total),
+        barClass: "bg-rose-500",
+        textClass: "text-rose-700",
+      },
+      {
+        label: "후속 확인",
+        count: followUp,
+        percent: getPercent(followUp, total),
+        barClass: "bg-amber-500",
+        textClass: "text-amber-700",
+      },
+      {
+        label: "검사 대기",
+        count: waiting,
+        percent: getPercent(waiting, total),
+        barClass: "bg-slate-400",
+        textClass: "text-slate-600",
+      },
+    ];
+
+    const defectReasonRows = Array.from(defectReasonMap.entries())
+      .map(([reason, count]) => ({
+        reason,
+        count,
+        percent: getPercent(count, defective),
+      }))
+      .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason, "ko-KR"));
+
+    const productDefectRows = Array.from(productDefectMap.entries())
+      .map(([product, value]) => ({
+        product,
+        total: value.total,
+        reasons: Array.from(value.reasons.entries())
+          .map(([reason, count]) => ({ reason, count }))
+          .sort((a, b) =>
+            b.count - a.count || a.reason.localeCompare(b.reason, "ko-KR")
+          ),
+      }))
+      .sort((a, b) => b.total - a.total || a.product.localeCompare(b.product, "ko-KR"));
 
     return {
       total,
       normal,
       defective,
       followUp,
-      totalPhotoSize,
+      waiting,
+      defectRate: getPercent(defective, total),
+      normalRate: getPercent(normal, total),
+      resultBars,
+      defectReasonRows,
+      productDefectRows,
     };
-  }, [records]);
+  }, [todayRecords]);
 
   const productFilterOptions = useMemo(() => {
     const productSet = new Set<string>();
@@ -1549,8 +1695,7 @@ export default function ReturnRecordApp() {
                 반품 검사/수리 기록 프로그램
               </h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                대상: 휴대용분유포트 · (분리형) 휴대용분유포트 · 분유쉐이커 · LED분유쉐이커 / 일반반품 ·
-                변심반품 · 불량반품 · 불량교환 · AS · 검수
+                대상: 모든 가전류 / 일반반품 · 변심반품 · 불량반품 · 불량교환 · AS · 검수
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-500">
                 기록은 서버에 저장되므로 PC와 휴대폰에서 동일하게 조회됩니다.
@@ -1590,61 +1735,222 @@ export default function ReturnRecordApp() {
           )}
         </div>
 
-        <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <Card className="rounded-3xl shadow-sm">
-            <CardContent className="flex items-center justify-between p-6">
-              <div>
-                <p className="text-sm text-slate-500">전체 기록</p>
-                <p className="mt-2 text-3xl font-bold">{summary.total}</p>
-                <p className="mt-1 text-xs text-slate-500">누적 등록 건수</p>
+        <div className="mb-6 space-y-6">
+          <Card className="overflow-hidden rounded-[2rem] border-slate-200 bg-slate-950 text-white shadow-sm">
+            <CardContent className="p-6 md:p-7">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/10">
+                    <Activity className="h-4 w-4" />
+                    TODAY INSPECTION REPORT
+                  </div>
+                  <h2 className="mt-4 text-2xl font-bold tracking-tight md:text-3xl">
+                    오늘의 반품/AS 검수 리포트
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    {formatKoreanDateFromDateKey(todayKey)} 기준으로 정상, 불량, 후속 확인 대상을 자동 집계합니다.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 sm:min-w-[320px]">
+                  <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
+                    <p className="text-xs font-semibold text-slate-300">불량률</p>
+                    <p className="mt-2 text-3xl font-bold">{todayDashboard.defectRate}%</p>
+                    <p className="mt-1 text-xs text-slate-400">오늘 등록 기준</p>
+                  </div>
+                  <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
+                    <p className="text-xs font-semibold text-slate-300">정상 비율</p>
+                    <p className="mt-2 text-3xl font-bold">{todayDashboard.normalRate}%</p>
+                    <p className="mt-1 text-xs text-slate-400">재상품화 가능성</p>
+                  </div>
+                </div>
               </div>
-              <ClipboardList className="h-10 w-10 text-slate-300" />
+
+              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-500">오늘 등록</p>
+                      <p className="mt-2 text-3xl font-bold">{todayDashboard.total}</p>
+                      <p className="mt-1 text-xs text-slate-500">금일 접수/검수 건수</p>
+                    </div>
+                    <ClipboardList className="h-9 w-9 text-slate-300" />
+                  </div>
+                </div>
+
+                <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-700">정상확인</p>
+                      <p className="mt-2 text-3xl font-bold">{todayDashboard.normal}</p>
+                      <p className="mt-1 text-xs text-slate-500">재고 추가 가능</p>
+                    </div>
+                    <CheckCircle2 className="h-9 w-9 text-emerald-200" />
+                  </div>
+                </div>
+
+                <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-rose-700">불량판정</p>
+                      <p className="mt-2 text-3xl font-bold">{todayDashboard.defective}</p>
+                      <p className="mt-1 text-xs text-slate-500">폐기/불량 처리</p>
+                    </div>
+                    <XCircle className="h-9 w-9 text-rose-200" />
+                  </div>
+                </div>
+
+                <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-amber-700">후속 확인</p>
+                      <p className="mt-2 text-3xl font-bold">{todayDashboard.followUp}</p>
+                      <p className="mt-1 text-xs text-slate-500">추가 점검 필요</p>
+                    </div>
+                    <Clock3 className="h-9 w-9 text-amber-200" />
+                  </div>
+                </div>
+
+                <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-600">검사 대기</p>
+                      <p className="mt-2 text-3xl font-bold">{todayDashboard.waiting}</p>
+                      <p className="mt-1 text-xs text-slate-500">결과 입력 전</p>
+                    </div>
+                    <Loader2 className="h-9 w-9 text-slate-300" />
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl shadow-sm">
-            <CardContent className="flex items-center justify-between p-6">
-              <div>
-                <p className="text-sm text-slate-500">정상확인</p>
-                <p className="mt-2 text-3xl font-bold">{summary.normal}</p>
-                <p className="mt-1 text-xs text-slate-500">재고 추가 가능 대상</p>
-              </div>
-              <CheckCircle2 className="h-10 w-10 text-slate-300" />
-            </CardContent>
-          </Card>
+          <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+            <Card className="rounded-[2rem] border-slate-200 bg-white shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-500">검사결과 비율</p>
+                    <CardTitle className="mt-1 text-xl">오늘의 처리 상태</CardTitle>
+                  </div>
+                  <BarChart3 className="h-8 w-8 text-slate-300" />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {todayDashboard.total === 0 ? (
+                  <div className="rounded-3xl border border-dashed p-8 text-center text-sm text-slate-500">
+                    오늘 등록된 기록이 없습니다.
+                  </div>
+                ) : (
+                  todayDashboard.resultBars.map((item) => (
+                    <div key={item.label} className="space-y-2">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-semibold text-slate-700">{item.label}</span>
+                        <span className={`font-bold ${item.textClass}`}>
+                          {item.count}건 · {item.percent}%
+                        </span>
+                      </div>
+                      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className={`h-full rounded-full ${item.barClass}`}
+                          style={{ width: `${item.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
 
-          <Card className="rounded-3xl shadow-sm">
-            <CardContent className="flex items-center justify-between p-6">
-              <div>
-                <p className="text-sm text-slate-500">불량판정</p>
-                <p className="mt-2 text-3xl font-bold">{summary.defective}</p>
-                <p className="mt-1 text-xs text-slate-500">폐기/불량 처리 대상</p>
-              </div>
-              <XCircle className="h-10 w-10 text-slate-300" />
-            </CardContent>
-          </Card>
+            <Card className="rounded-[2rem] border-slate-200 bg-white shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-500">불량 사유 TOP</p>
+                    <CardTitle className="mt-1 text-xl">비고 키워드 자동 집계</CardTitle>
+                  </div>
+                  <PieChart className="h-8 w-8 text-slate-300" />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {todayDashboard.defectReasonRows.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed p-8 text-center text-sm text-slate-500">
+                    오늘 불량판정 기록이 없습니다.
+                  </div>
+                ) : (
+                  todayDashboard.defectReasonRows.map((item, index) => (
+                    <div key={item.reason} className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-white text-sm font-bold text-slate-700 shadow-sm">
+                            {index + 1}
+                          </span>
+                          <div>
+                            <p className="font-semibold text-slate-800">{item.reason}</p>
+                            <p className="text-xs text-slate-500">불량판정 내 비중 {item.percent}%</p>
+                          </div>
+                        </div>
+                        <p className="text-2xl font-bold text-slate-900">{item.count}건</p>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                        <div
+                          className="h-full rounded-full bg-rose-500"
+                          style={{ width: `${item.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
-          <Card className="rounded-3xl shadow-sm">
-            <CardContent className="flex items-center justify-between p-6">
-              <div>
-                <p className="text-sm text-slate-500">후속 확인 필요</p>
-                <p className="mt-2 text-3xl font-bold">{summary.followUp}</p>
-                <p className="mt-1 text-xs text-slate-500">추가 점검 대상</p>
+          <Card className="rounded-[2rem] border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-500">모델별 불량 리포트</p>
+                  <CardTitle className="mt-1 text-xl">제품별 불량 사유 요약</CardTitle>
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600">
+                  <TrendingUp className="h-4 w-4" />
+                  보고용 요약 데이터
+                </div>
               </div>
-              <Clock3 className="h-10 w-10 text-slate-300" />
-            </CardContent>
-          </Card>
+            </CardHeader>
+            <CardContent>
+              {todayDashboard.productDefectRows.length === 0 ? (
+                <div className="rounded-3xl border border-dashed p-8 text-center text-sm text-slate-500">
+                  오늘 모델별 불량 데이터가 없습니다.
+                </div>
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {todayDashboard.productDefectRows.map((item) => (
+                    <div key={item.product} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-500">제품명</p>
+                          <h3 className="mt-1 text-lg font-bold text-slate-900">{item.product}</h3>
+                        </div>
+                        <span className="rounded-2xl bg-white px-4 py-2 text-sm font-bold text-rose-700 shadow-sm">
+                          불량 {item.total}건
+                        </span>
+                      </div>
 
-          <Card className="rounded-3xl shadow-sm">
-            <CardContent className="flex items-center justify-between p-6">
-              <div>
-                <p className="text-sm text-slate-500">사진 사용량</p>
-                <p className="mt-2 text-3xl font-bold">
-                  {formatBytes(summary.totalPhotoSize)}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">저장된 사진 총합</p>
-              </div>
-              <Database className="h-10 w-10 text-slate-300" />
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {item.reasons.map((reason) => (
+                          <span
+                            key={`${item.product}-${reason.reason}`}
+                            className="rounded-full border border-white bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm"
+                          >
+                            {reason.reason} {reason.count}건
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

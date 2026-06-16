@@ -187,7 +187,8 @@ const DEFECTIVE_NOTE_OPTIONS = [
   "이물질",
 ];
 
-const CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY =
+const CUSTOM_DEFECTIVE_NOTE_OPTIONS_API_PATH = "/api/note-options";
+const LEGACY_CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY =
   "return-record-custom-defective-note-options";
 
 function normalizeNoteOptionText(value: string) {
@@ -897,6 +898,8 @@ export default function ReturnRecordApp() {
   const [customDefectiveNoteOptions, setCustomDefectiveNoteOptions] = useState<
     string[]
   >([]);
+  const [loadingNoteOptions, setLoadingNoteOptions] = useState(false);
+  const [savingNoteOption, setSavingNoteOption] = useState(false);
 
   const [invoicePhotos, setInvoicePhotos] = useState<UploadedPhoto[]>([]);
   const [productPhotos, setProductPhotos] = useState<UploadedPhoto[]>([]);
@@ -948,24 +951,97 @@ export default function ReturnRecordApp() {
     fetchRecords();
   }, []);
 
-  useEffect(() => {
+  function getLegacyCustomDefectiveNoteOptions() {
     try {
       const storedOptions = window.localStorage.getItem(
-        CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY
+        LEGACY_CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY
       );
 
-      if (!storedOptions) return;
+      if (!storedOptions) return [];
 
       const parsedOptions = JSON.parse(storedOptions);
 
-      if (Array.isArray(parsedOptions)) {
-        setCustomDefectiveNoteOptions(
-          getUniqueNoteOptions(parsedOptions.map((item) => String(item)))
+      if (!Array.isArray(parsedOptions)) return [];
+
+      return getUniqueNoteOptions(parsedOptions.map((item) => String(item)));
+    } catch {
+      window.localStorage.removeItem(
+        LEGACY_CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY
+      );
+      return [];
+    }
+  }
+
+  async function fetchCustomDefectiveNoteOptions() {
+    try {
+      setLoadingNoteOptions(true);
+
+      const response = await fetch(CUSTOM_DEFECTIVE_NOTE_OPTIONS_API_PATH, {
+        cache: "no-store",
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "비고 문구 조회에 실패했습니다.");
+      }
+
+      let nextOptions = getUniqueNoteOptions(
+        Array.isArray(data.customDefectiveNoteOptions)
+          ? data.customDefectiveNoteOptions.map((item: unknown) => String(item))
+          : []
+      );
+
+      const legacyOptions = getLegacyCustomDefectiveNoteOptions();
+      const optionsToMigrate = legacyOptions.filter(
+        (option) =>
+          !DEFECTIVE_NOTE_OPTIONS.includes(option) &&
+          !nextOptions.includes(option)
+      );
+
+      if (optionsToMigrate.length > 0) {
+        const migrateResponse = await fetch(
+          CUSTOM_DEFECTIVE_NOTE_OPTIONS_API_PATH,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ options: optionsToMigrate }),
+          }
+        );
+        const migrateData = await migrateResponse.json();
+
+        if (!migrateResponse.ok) {
+          throw new Error(
+            migrateData?.error || "기존 비고 문구 서버 저장에 실패했습니다."
+          );
+        }
+
+        nextOptions = getUniqueNoteOptions(
+          Array.isArray(migrateData.customDefectiveNoteOptions)
+            ? migrateData.customDefectiveNoteOptions.map((item: unknown) =>
+                String(item)
+              )
+            : nextOptions
+        );
+
+        window.localStorage.removeItem(
+          LEGACY_CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY
         );
       }
-    } catch {
-      window.localStorage.removeItem(CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY);
+
+      setCustomDefectiveNoteOptions(nextOptions);
+    } catch (error) {
+      setStatusError(
+        error instanceof Error
+          ? error.message
+          : "비고 문구를 불러오지 못했습니다."
+      );
+    } finally {
+      setLoadingNoteOptions(false);
     }
+  }
+
+  useEffect(() => {
+    fetchCustomDefectiveNoteOptions();
   }, []);
 
   const defectiveNoteOptionsForReport = useMemo(
@@ -1153,7 +1229,7 @@ export default function ReturnRecordApp() {
     );
   }
 
-  function handleAddDefectiveNoteOption() {
+  async function handleAddDefectiveNoteOption() {
     const inputValue = window.prompt(
       "비고 버튼에 추가할 불량 문구를 입력해주세요."
     );
@@ -1172,18 +1248,39 @@ export default function ReturnRecordApp() {
       return;
     }
 
-    const nextCustomOptions = getUniqueNoteOptions([
-      ...customDefectiveNoteOptions,
-      nextOption,
-    ]);
+    try {
+      setSavingNoteOption(true);
+      setStatusError("");
 
-    setCustomDefectiveNoteOptions(nextCustomOptions);
-    window.localStorage.setItem(
-      CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY,
-      JSON.stringify(nextCustomOptions)
-    );
-    setStatusError("");
-    setStatusMessage(`비고 문구 '${nextOption}'가 추가되었습니다.`);
+      const response = await fetch(CUSTOM_DEFECTIVE_NOTE_OPTIONS_API_PATH, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ option: nextOption }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "비고 문구 저장에 실패했습니다.");
+      }
+
+      const nextCustomOptions = getUniqueNoteOptions(
+        Array.isArray(data.customDefectiveNoteOptions)
+          ? data.customDefectiveNoteOptions.map((item: unknown) => String(item))
+          : [...customDefectiveNoteOptions, nextOption]
+      );
+
+      setCustomDefectiveNoteOptions(nextCustomOptions);
+      setStatusMessage(
+        `비고 문구 '${nextOption}'가 서버에 추가되었습니다.`
+      );
+    } catch (error) {
+      setStatusMessage("");
+      setStatusError(
+        error instanceof Error ? error.message : "비고 문구 저장에 실패했습니다."
+      );
+    } finally {
+      setSavingNoteOption(false);
+    }
   }
 
   function resetForm() {
@@ -2634,10 +2731,11 @@ export default function ReturnRecordApp() {
                       <button
                         type="button"
                         onClick={handleAddDefectiveNoteOption}
-                        className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                        title="비고 불량 문구 추가"
+                        disabled={savingNoteOption || loadingNoteOptions}
+                        className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        title="비고 불량 문구 서버 추가"
                       >
-                        +
+                        {savingNoteOption ? "저장중" : "+"}
                       </button>
                     )}
                   </div>
@@ -3441,10 +3539,11 @@ export default function ReturnRecordApp() {
                                     <button
                                       type="button"
                                       onClick={handleAddDefectiveNoteOption}
-                                      className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                                      title="비고 불량 문구 추가"
+                                      disabled={savingNoteOption || loadingNoteOptions}
+                                      className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="비고 불량 문구 서버 추가"
                                     >
-                                      +
+                                      {savingNoteOption ? "저장중" : "+"}
                                     </button>
                                   )}
                                 </div>

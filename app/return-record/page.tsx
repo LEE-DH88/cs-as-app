@@ -1,4 +1,4 @@
-// LEFT_TABS_REORDERED_QUICK_WORK_2026_06_16
+// LEFT_TABS_CLEAN_QUICK_WORK_2026_06_16
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -1876,7 +1876,6 @@ export default function ReturnRecordApp() {
             <Card className="overflow-hidden rounded-[2rem] border-slate-200 bg-white shadow-sm">
               <CardContent className="space-y-5 p-4">
                 <div className="rounded-3xl bg-slate-950 p-5 text-white">
-                  <p className="text-xs font-semibold text-slate-400">LEFT_TABS_REORDERED_QUICK_WORK_2026_06_16</p>
                   <h2 className="mt-2 text-xl font-bold">업무 대시보드</h2>
                   <p className="mt-2 text-xs leading-5 text-slate-400">
                     등록부터 보고까지 필요한 화면만 빠르게 선택합니다.

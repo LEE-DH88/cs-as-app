@@ -466,8 +466,8 @@ function formatNotionProcessDate(value: string) {
 function formatNotionProductName(productName: string) {
   const normalized = productName.trim();
 
-  // 노션 처리현황에는 아래 4종 제품만 포함
-  // 젖병살균세척기 등 기타 제품은 B급활용이어도 제외
+  // 기존 4종은 노션에 사용하던 표기명을 유지하고,
+  // 그 외 입고 제품은 입력된 제품명 그대로 노션 처리현황에 포함합니다.
   const productMap: Record<string, string> = {
     "휴대용분유포트": "[꿈비] 휴대용 분유포트",
     "(분리형) 휴대용분유포트": "[꿈비] 분리형 휴대용 분유포트",
@@ -475,7 +475,7 @@ function formatNotionProductName(productName: string) {
     "LED분유쉐이커": "[꿈비] 뭉침없이 조용한 분유쉐이커",
   };
 
-  return productMap[normalized] || "";
+  return productMap[normalized] || normalized;
 }
 
 function notionDateToTime(value: string) {
@@ -491,19 +491,36 @@ function notionDateToTime(value: string) {
 }
 
 function getNotionProcessResult(record: ReturnRecord) {
-  // 자체폐기는 노션 처리현황에 기재하지 않음
-  if (record.processAction === "자체폐기") {
-    return "";
-  }
+  const returnType = String(record.returnType || "").replace(/\s+/g, "").toLowerCase();
+  const inspectionResult = String(record.inspectionResult || "").replace(/\s+/g, "").toLowerCase();
+  const processAction = String(record.processAction || "").replace(/\s+/g, "").toLowerCase();
 
-  // 자체 B급활용은 원자재화로 기재
-  if (record.processAction === "자체 B급활용") {
-    return "원자재화";
-  }
+  const isGeneralOrChange =
+    returnType.includes("일반") || returnType.includes("변심");
+  const isAsOrInspection =
+    returnType.includes("as") || returnType.includes("검수");
+  const isDefect =
+    returnType.includes("불량교환") || returnType.includes("불량반품");
 
-  // 정상확인 / 기존 정상화 완료 데이터는 재상품화로 기재
-  if (isNormalInspectionResult(record.inspectionResult)) {
+  const isNormal = isNormalInspectionResult(record.inspectionResult);
+  const isBGrade =
+    inspectionResult.includes("b급") ||
+    inspectionResult.includes("b") ||
+    processAction.includes("b급") ||
+    processAction.includes("b");
+  const isDisposal = processAction.includes("폐기") || inspectionResult.includes("폐기");
+
+  // 폐기 건은 노션_처리현황 탭에 행 자체를 만들지 않습니다.
+  if (isDisposal) return "";
+
+  // 일반반품 / 변심반품 + 정상 → 재상품화
+  if (isGeneralOrChange && isNormal) {
     return "재상품화";
+  }
+
+  // 일반반품 / 변심반품 / AS / 검수 / 불량교환 / 불량반품 + B급 → 원자재화
+  if ((isGeneralOrChange || isAsOrInspection || isDefect) && isBGrade) {
+    return "원자재화";
   }
 
   return "";

@@ -2147,32 +2147,49 @@ export default function ReturnRecordApp() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xl">
                   <AlertTriangle className="h-5 w-5 text-slate-500" />
-                  불량 사유 TOP
+                  모델별 불량 TOP
                 </CardTitle>
                 <p className="text-sm text-slate-500">
-                  비고란 키워드를 기준으로 자동 집계합니다.
+                  선택 기간의 불량판정 기록을 제품명 기준으로 집계합니다.
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
-                {selectedReportSummary.defectReasonRows.length === 0 ? (
+                {selectedReportSummary.modelDefectRows.length === 0 ? (
                   <div className="rounded-3xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
-                    선택 기간에 집계할 불량 사유가 없습니다.
+                    선택 기간에 집계할 모델별 불량 데이터가 없습니다.
                   </div>
                 ) : (
-                  selectedReportSummary.defectReasonRows.slice(0, 6).map((row) => (
-                    <div key={row.label} className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-semibold text-slate-700">{row.label}</span>
-                        <span className="text-slate-500">{row.count}건</span>
+                  selectedReportSummary.modelDefectRows.slice(0, 6).map((row) => {
+                    const modelPercent = calculatePercent(
+                      row.count,
+                      selectedReportSummary.defective || row.count
+                    );
+
+                    return (
+                      <div key={row.productName} className="space-y-2">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="min-w-0 truncate font-semibold text-slate-700">
+                            {row.productName}
+                          </span>
+                          <span className="shrink-0 text-slate-500">{row.count}건</span>
+                        </div>
+                        <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-sky-600 transition-all"
+                            style={{ width: `${Math.max(modelPercent, row.count > 0 ? 4 : 0)}%` }}
+                          />
+                        </div>
+                        <p className="truncate text-xs text-slate-400">
+                          {row.reasons.length > 0
+                            ? row.reasons
+                                .slice(0, 3)
+                                .map((reason) => `${reason.label} ${reason.count}건`)
+                                .join(" · ")
+                            : "사유 미입력"}
+                        </p>
                       </div>
-                      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-rose-500 transition-all"
-                          style={{ width: `${Math.max(row.percent, row.count > 0 ? 4 : 0)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </CardContent>
             </Card>

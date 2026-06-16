@@ -491,9 +491,15 @@ function notionDateToTime(value: string) {
 }
 
 function getNotionProcessResult(record: ReturnRecord) {
-  const returnType = String(record.returnType || "").replace(/\s+/g, "").toLowerCase();
-  const inspectionResult = String(record.inspectionResult || "").replace(/\s+/g, "").toLowerCase();
-  const processAction = String(record.processAction || "").replace(/\s+/g, "").toLowerCase();
+  const normalizeText = (value?: string) =>
+    String(value || "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+
+  const returnType = normalizeText(record.returnType);
+  const inspectionResult = normalizeText(record.inspectionResult);
+  const processAction = normalizeText(record.processAction);
+  const note = normalizeText(record.note);
 
   const isGeneralOrChange =
     returnType.includes("일반") || returnType.includes("변심");
@@ -501,14 +507,26 @@ function getNotionProcessResult(record: ReturnRecord) {
     returnType.includes("as") || returnType.includes("검수");
   const isDefect =
     returnType.includes("불량교환") || returnType.includes("불량반품");
+  const isNotionTargetType = isGeneralOrChange || isAsOrInspection || isDefect;
 
-  const isNormal = isNormalInspectionResult(record.inspectionResult);
+  const isNormal =
+    inspectionResult.includes("정상확인") ||
+    inspectionResult.includes("정상화완료") ||
+    inspectionResult === "정상";
+
   const isBGrade =
+    processAction.includes("b급") ||
+    processAction.includes("b급활용") ||
+    processAction.includes("b") ||
     inspectionResult.includes("b급") ||
     inspectionResult.includes("b") ||
-    processAction.includes("b급") ||
-    processAction.includes("b");
-  const isDisposal = processAction.includes("폐기") || inspectionResult.includes("폐기");
+    note.includes("b급") ||
+    note.includes("b급활용");
+
+  const isDisposal =
+    processAction.includes("폐기") ||
+    inspectionResult.includes("폐기") ||
+    note.includes("폐기");
 
   // 폐기 건은 노션_처리현황 탭에 행 자체를 만들지 않습니다.
   if (isDisposal) return "";
@@ -519,7 +537,8 @@ function getNotionProcessResult(record: ReturnRecord) {
   }
 
   // 일반반품 / 변심반품 / AS / 검수 / 불량교환 / 불량반품 + B급 → 원자재화
-  if ((isGeneralOrChange || isAsOrInspection || isDefect) && isBGrade) {
+  // 예: 검수 + 불량 판정 + 자체 B급활용 + 비고에 B급활용 문구가 있는 건도 포함합니다.
+  if (isNotionTargetType && isBGrade) {
     return "원자재화";
   }
 

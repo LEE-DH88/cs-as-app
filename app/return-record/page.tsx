@@ -1,4 +1,4 @@
-// LEFT_TABS_CLEAN_QUICK_WORK_2026_06_16
+// LEFT_TABS_PRODUCT_NORMALIZED_2026_06_16
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -216,6 +216,59 @@ function calculatePercent(count: number, total: number) {
   return Math.round((count / total) * 1000) / 10;
 }
 
+function normalizeReportProductName(productName?: string) {
+  const original = (productName || "").trim();
+  if (!original) return "제품명 미입력";
+
+  const compact = original.replace(/\s+/g, "");
+  const upperCompact = compact.toUpperCase();
+
+  if (
+    upperCompact.includes("LED") ||
+    compact.includes("엘이디") ||
+    compact.includes("뭉침없이") ||
+    compact.includes("조용한")
+  ) {
+    return "LED분유쉐이커";
+  }
+
+  if (
+    compact === "분유쉐이커" ||
+    compact === "[꿈비]분유쉐이커" ||
+    compact.includes("기본분유쉐이커") ||
+    compact.includes("분유세이커") ||
+    compact.includes("분유쉐이커") ||
+    compact.includes("쉐이커") ||
+    compact.includes("세이커")
+  ) {
+    return "분유쉐이커";
+  }
+
+  if (compact.includes("분리형")) {
+    return "(분리형) 휴대용분유포트";
+  }
+
+  if (
+    compact.includes("휴대용분유포트") ||
+    compact.includes("휴대용분유") ||
+    compact.includes("분유포트")
+  ) {
+    return "휴대용분유포트";
+  }
+
+  if (
+    compact.includes("젖병살균세척기") ||
+    compact.includes("젖병세척기") ||
+    compact.includes("살균세척기") ||
+    upperCompact.includes("스팀PLUS") ||
+    compact.includes("스팀플러스")
+  ) {
+    return "젖병살균세척기";
+  }
+
+  return original;
+}
+
 function buildReportSummary(records: ReturnRecord[]) {
   const total = records.length;
   const normal = records.filter((record) =>
@@ -253,7 +306,7 @@ function buildReportSummary(records: ReturnRecord[]) {
       reasonMap.set(reason, (reasonMap.get(reason) || 0) + 1);
     });
 
-    const productName = record.productName || "제품명 미입력";
+    const productName = normalizeReportProductName(record.productName);
     const currentModel = modelMap.get(productName) || {
       count: 0,
       reasons: new Map<string, number>(),

@@ -48,6 +48,7 @@ type ProductSelectValue =
   | "(분리형) 휴대용분유포트"
   | "분유쉐이커"
   | "LED분유쉐이커"
+  | "젖병살균세척기"
   | "직접입력";
 
 type ProcessAction =
@@ -59,7 +60,9 @@ type ProcessAction =
 
 type InspectionResult =
   | "검사 대기"
+  | "정상확인"
   | "정상화 완료"
+  | "불량판정"
   | "불량 판정"
   | "후속 확인 필요";
 
@@ -122,6 +125,7 @@ const PRODUCT_TYPES: ProductSelectValue[] = [
   "(분리형) 휴대용분유포트",
   "분유쉐이커",
   "LED분유쉐이커",
+  "젖병살균세척기",
   "직접입력",
 ];
 
@@ -135,10 +139,87 @@ const PROCESS_ACTIONS: ProcessAction[] = [
 
 const RESULT_TYPES: InspectionResult[] = [
   "검사 대기",
-  "정상화 완료",
-  "불량 판정",
+  "정상확인",
+  "불량판정",
   "후속 확인 필요",
 ];
+
+const NORMAL_INSPECTION_RESULTS: InspectionResult[] = ["정상확인", "정상화 완료"];
+const DEFECTIVE_INSPECTION_RESULTS: InspectionResult[] = ["불량판정", "불량 판정"];
+
+const NORMAL_NOTE_OPTIONS = ["미개봉 새상품", "정상화 완료"];
+const DEFECTIVE_NOTE_OPTIONS = [
+  "전원불량",
+  "사용감",
+  "소음",
+  "누수",
+  "충전불량",
+  "회전불량",
+  "수분유입",
+  "이물질",
+];
+
+function normalizeInspectionResult(value: InspectionResult): InspectionResult {
+  if (value === "정상화 완료") return "정상확인";
+  if (value === "불량 판정") return "불량판정";
+  return value;
+}
+
+function isNormalInspectionResult(value?: string) {
+  return NORMAL_INSPECTION_RESULTS.includes(value as InspectionResult);
+}
+
+function isDefectiveInspectionResult(value?: string) {
+  return DEFECTIVE_INSPECTION_RESULTS.includes(value as InspectionResult);
+}
+
+function getProcessActionsByInspectionResult(value: InspectionResult): ProcessAction[] {
+  if (isNormalInspectionResult(value)) {
+    return ["안성물류이동"];
+  }
+
+  if (isDefectiveInspectionResult(value)) {
+    return ["안성물류폐기이동", "자체폐기", "자체 B급활용"];
+  }
+
+  return PROCESS_ACTIONS;
+}
+
+function getDefaultProcessActionByInspectionResult(
+  value: InspectionResult,
+  currentProcessAction: ProcessAction
+): ProcessAction {
+  const availableProcessActions = getProcessActionsByInspectionResult(value);
+
+  if (availableProcessActions.includes(currentProcessAction)) {
+    return currentProcessAction;
+  }
+
+  if (isNormalInspectionResult(value)) {
+    return "안성물류이동";
+  }
+
+  if (isDefectiveInspectionResult(value)) {
+    return "안성물류폐기이동";
+  }
+
+  return "미선택";
+}
+
+function getNoteOptionsByInspectionResult(value: InspectionResult) {
+  if (isNormalInspectionResult(value)) return NORMAL_NOTE_OPTIONS;
+  if (isDefectiveInspectionResult(value)) return DEFECTIVE_NOTE_OPTIONS;
+  return [];
+}
+
+function appendNoteOption(currentNote: string, option: string) {
+  const trimmedNote = currentNote.trim();
+
+  if (!trimmedNote) return option;
+  if (trimmedNote.includes(option)) return currentNote;
+
+  return `${trimmedNote}, ${option}`;
+}
 
 const MAX_INVOICE_PHOTOS = 2;
 const MAX_PRODUCT_PHOTOS = 4;
@@ -234,8 +315,8 @@ function getNotionProcessResult(record: ReturnRecord) {
     return "원자재화";
   }
 
-  // 정상화 완료는 재상품화로 기재
-  if (record.inspectionResult === "정상화 완료") {
+  // 정상확인 / 기존 정상화 완료 데이터는 재상품화로 기재
+  if (isNormalInspectionResult(record.inspectionResult)) {
     return "재상품화";
   }
 
@@ -556,8 +637,12 @@ export default function ReturnRecordApp() {
 
   const summary = useMemo(() => {
     const total = records.length;
-    const normal = records.filter((r) => r.inspectionResult === "정상화 완료").length;
-    const defective = records.filter((r) => r.inspectionResult === "불량 판정").length;
+    const normal = records.filter((r) =>
+      isNormalInspectionResult(r.inspectionResult)
+    ).length;
+    const defective = records.filter((r) =>
+      isDefectiveInspectionResult(r.inspectionResult)
+    ).length;
     const followUp = records.filter((r) => r.inspectionResult === "후속 확인 필요").length;
 
     const totalPhotoSize = records.reduce((acc, record) => {
@@ -616,7 +701,12 @@ export default function ReturnRecordApp() {
         filterProduct === "전체" || record.productName === filterProduct;
 
       const matchesResult =
-        filterResult === "전체" || record.inspectionResult === filterResult;
+        filterResult === "전체" ||
+        record.inspectionResult === filterResult ||
+        (filterResult === "정상확인" &&
+          isNormalInspectionResult(record.inspectionResult)) ||
+        (filterResult === "불량판정" &&
+          isDefectiveInspectionResult(record.inspectionResult));
 
       return (
         matchesSearch &&
@@ -689,6 +779,10 @@ export default function ReturnRecordApp() {
 
     if (text.includes("분리형")) {
       return "(분리형) 휴대용분유포트";
+    }
+
+    if (/젖병살균세척기|젖병세척기|살균세척기|스팀플러스|스팀PLUS/i.test(text)) {
+      return "젖병살균세척기";
     }
 
     if (value && PRODUCT_TYPES.includes(value as ProductSelectValue)) {
@@ -883,6 +977,10 @@ export default function ReturnRecordApp() {
 
   function extractProductNameFromRawText(rawText?: string) {
     const compact = compactOcrText(rawText);
+
+    if (/젖병살균세척기|젖병세척기|살균세척기|스팀플러스|스팀PLUS/i.test(compact)) {
+      return "젖병살균세척기";
+    }
 
     if (/분리형|분리|휴대용분유포트|휴대용분유|분유포트/.test(compact)) {
       if (/분리형|분리/.test(compact)) return "(분리형) 휴대용분유포트";
@@ -1127,8 +1225,14 @@ export default function ReturnRecordApp() {
       setProductName("직접입력");
       setCustomProductName(record.productName || "");
     }
-    setProcessAction(record.processAction || "미선택");
-    setInspectionResult(record.inspectionResult);
+    const normalizedResult = normalizeInspectionResult(record.inspectionResult);
+    setProcessAction(
+      getDefaultProcessActionByInspectionResult(
+        normalizedResult,
+        record.processAction || "미선택"
+      )
+    );
+    setInspectionResult(normalizedResult);
     setNote(record.note || "");
     setInvoicePhotos(record.invoicePhotos || []);
     setProductPhotos(record.productPhotos || []);
@@ -1147,6 +1251,8 @@ export default function ReturnRecordApp() {
       record.productName as ProductSelectValue
     );
 
+    const normalizedResult = normalizeInspectionResult(record.inspectionResult);
+
     return {
       invoiceNumber: record.invoiceNumber || "",
       orderNumber: record.orderNumber || "",
@@ -1156,8 +1262,11 @@ export default function ReturnRecordApp() {
         ? (record.productName as ProductSelectValue)
         : "직접입력",
       customProductName: isKnownProduct ? "" : record.productName || "",
-      processAction: record.processAction || "미선택",
-      inspectionResult: record.inspectionResult,
+      processAction: getDefaultProcessActionByInspectionResult(
+        normalizedResult,
+        record.processAction || "미선택"
+      ),
+      inspectionResult: normalizedResult,
       note: record.note || "",
     };
   }
@@ -1205,8 +1314,11 @@ export default function ReturnRecordApp() {
       customerName: inlineEditDraft.customerName.trim(),
       returnType: inlineEditDraft.returnType,
       productName: finalProductName,
-      processAction: inlineEditDraft.processAction,
-      inspectionResult: inlineEditDraft.inspectionResult,
+      processAction: getDefaultProcessActionByInspectionResult(
+        inlineEditDraft.inspectionResult,
+        inlineEditDraft.processAction
+      ),
+      inspectionResult: normalizeInspectionResult(inlineEditDraft.inspectionResult),
       note: inlineEditDraft.note.trim(),
       invoicePhotos: record.invoicePhotos || [],
       productPhotos: record.productPhotos || [],
@@ -1279,8 +1391,11 @@ export default function ReturnRecordApp() {
       customerName: customerName.trim(),
       returnType,
       productName: finalProductName,
-      processAction,
-      inspectionResult,
+      processAction: getDefaultProcessActionByInspectionResult(
+        inspectionResult,
+        processAction
+      ),
+      inspectionResult: normalizeInspectionResult(inspectionResult),
       note: note.trim(),
       invoicePhotos,
       productPhotos,
@@ -1490,7 +1605,7 @@ export default function ReturnRecordApp() {
           <Card className="rounded-3xl shadow-sm">
             <CardContent className="flex items-center justify-between p-6">
               <div>
-                <p className="text-sm text-slate-500">정상화 완료</p>
+                <p className="text-sm text-slate-500">정상확인</p>
                 <p className="mt-2 text-3xl font-bold">{summary.normal}</p>
                 <p className="mt-1 text-xs text-slate-500">재고 추가 가능 대상</p>
               </div>
@@ -1501,7 +1616,7 @@ export default function ReturnRecordApp() {
           <Card className="rounded-3xl shadow-sm">
             <CardContent className="flex items-center justify-between p-6">
               <div>
-                <p className="text-sm text-slate-500">불량 판정</p>
+                <p className="text-sm text-slate-500">불량판정</p>
                 <p className="mt-2 text-3xl font-bold">{summary.defective}</p>
                 <p className="mt-1 text-xs text-slate-500">폐기/불량 처리 대상</p>
               </div>
@@ -1640,9 +1755,16 @@ export default function ReturnRecordApp() {
                   <Label>검사결과</Label>
                   <Select
                     value={inspectionResult}
-                    onValueChange={(value) =>
-                      setInspectionResult(value as InspectionResult)
-                    }
+                    onValueChange={(value) => {
+                      const nextInspectionResult = value as InspectionResult;
+                      setInspectionResult(nextInspectionResult);
+                      setProcessAction((prev) =>
+                        getDefaultProcessActionByInspectionResult(
+                          nextInspectionResult,
+                          prev
+                        )
+                      );
+                    }}
                   >
                     <SelectTrigger className="rounded-2xl">
                       <SelectValue />
@@ -1667,11 +1789,13 @@ export default function ReturnRecordApp() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {PROCESS_ACTIONS.map((item) => (
-                        <SelectItem key={item} value={item}>
-                          {item}
-                        </SelectItem>
-                      ))}
+                      {getProcessActionsByInspectionResult(inspectionResult).map(
+                        (item) => (
+                          <SelectItem key={item} value={item}>
+                            {item}
+                          </SelectItem>
+                        )
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1679,10 +1803,24 @@ export default function ReturnRecordApp() {
 
               <div className="space-y-2">
                 <Label>비고</Label>
+                {getNoteOptionsByInspectionResult(inspectionResult).length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {getNoteOptionsByInspectionResult(inspectionResult).map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => setNote((prev) => appendNoteOption(prev, item))}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-700 transition hover:bg-slate-50"
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <Textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="예: 검사 완료 후 정상화 / 모터 불량으로 불량 판정 / 안성물류 송장 매칭 완료 등"
+                  placeholder="선택 문구를 누른 뒤 추가 내용을 직접 입력할 수 있습니다."
                   className="min-h-[120px] rounded-2xl"
                 />
               </div>
@@ -2376,17 +2514,24 @@ export default function ReturnRecordApp() {
                                 <Label>검사결과</Label>
                                 <Select
                                   value={inlineEditDraft.inspectionResult}
-                                  onValueChange={(value) =>
+                                  onValueChange={(value) => {
+                                    const nextInspectionResult =
+                                      value as InspectionResult;
                                     setInlineEditDraft((prev) =>
                                       prev
                                         ? {
                                             ...prev,
                                             inspectionResult:
-                                              value as InspectionResult,
+                                              nextInspectionResult,
+                                            processAction:
+                                              getDefaultProcessActionByInspectionResult(
+                                                nextInspectionResult,
+                                                prev.processAction
+                                              ),
                                           }
                                         : prev
-                                    )
-                                  }
+                                    );
+                                  }}
                                 >
                                   <SelectTrigger className="rounded-2xl bg-white">
                                     <SelectValue />
@@ -2420,7 +2565,9 @@ export default function ReturnRecordApp() {
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {PROCESS_ACTIONS.map((item) => (
+                                    {getProcessActionsByInspectionResult(
+                                      inlineEditDraft.inspectionResult
+                                    ).map((item) => (
                                       <SelectItem key={item} value={item}>
                                         {item}
                                       </SelectItem>
@@ -2432,6 +2579,36 @@ export default function ReturnRecordApp() {
 
                             <div className="space-y-2">
                               <Label>비고</Label>
+                              {getNoteOptionsByInspectionResult(
+                                inlineEditDraft.inspectionResult
+                              ).length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {getNoteOptionsByInspectionResult(
+                                    inlineEditDraft.inspectionResult
+                                  ).map((item) => (
+                                    <button
+                                      key={item}
+                                      type="button"
+                                      onClick={() =>
+                                        setInlineEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                note: appendNoteOption(
+                                                  prev.note,
+                                                  item
+                                                ),
+                                              }
+                                            : prev
+                                        )
+                                      }
+                                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-700 transition hover:bg-slate-50"
+                                    >
+                                      {item}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                               <Textarea
                                 value={inlineEditDraft.note}
                                 onChange={(e) =>

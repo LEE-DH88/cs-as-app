@@ -187,6 +187,27 @@ const DEFECTIVE_NOTE_OPTIONS = [
   "이물질",
 ];
 
+const CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY =
+  "return-record-custom-defective-note-options";
+
+function normalizeNoteOptionText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function getUniqueNoteOptions(options: string[]) {
+  const optionSet = new Set<string>();
+
+  options.forEach((option) => {
+    const normalized = normalizeNoteOptionText(option);
+
+    if (normalized) {
+      optionSet.add(normalized);
+    }
+  });
+
+  return Array.from(optionSet);
+}
+
 const REPORT_RANGE_OPTIONS: {
   value: ReportRange;
   label: string;
@@ -269,7 +290,10 @@ function normalizeReportProductName(productName?: string) {
   return original;
 }
 
-function buildReportSummary(records: ReturnRecord[]) {
+function buildReportSummary(
+  records: ReturnRecord[],
+  defectiveNoteOptions: string[] = DEFECTIVE_NOTE_OPTIONS
+) {
   const total = records.length;
   const normal = records.filter((record) =>
     isNormalInspectionResult(record.inspectionResult)
@@ -297,7 +321,7 @@ function buildReportSummary(records: ReturnRecord[]) {
 
   defectiveRecords.forEach((record) => {
     const noteText = record.note || "";
-    const matchedReasons = DEFECTIVE_NOTE_OPTIONS.filter((reason) =>
+    const matchedReasons = defectiveNoteOptions.filter((reason) =>
       noteText.includes(reason)
     );
     const reasons = matchedReasons.length > 0 ? matchedReasons : ["기타"];
@@ -397,9 +421,17 @@ function getDefaultProcessActionByInspectionResult(
   return "미선택";
 }
 
-function getNoteOptionsByInspectionResult(value: InspectionResult) {
+function getNoteOptionsByInspectionResult(
+  value: InspectionResult,
+  customDefectiveNoteOptions: string[] = []
+) {
   if (isNormalInspectionResult(value)) return NORMAL_NOTE_OPTIONS;
-  if (isDefectiveInspectionResult(value)) return DEFECTIVE_NOTE_OPTIONS;
+  if (isDefectiveInspectionResult(value)) {
+    return getUniqueNoteOptions([
+      ...DEFECTIVE_NOTE_OPTIONS,
+      ...customDefectiveNoteOptions,
+    ]);
+  }
   return [];
 }
 
@@ -862,6 +894,9 @@ export default function ReturnRecordApp() {
   const [inspectionResult, setInspectionResult] =
     useState<InspectionResult>("검사 대기");
   const [note, setNote] = useState("");
+  const [customDefectiveNoteOptions, setCustomDefectiveNoteOptions] = useState<
+    string[]
+  >([]);
 
   const [invoicePhotos, setInvoicePhotos] = useState<UploadedPhoto[]>([]);
   const [productPhotos, setProductPhotos] = useState<UploadedPhoto[]>([]);
@@ -913,6 +948,34 @@ export default function ReturnRecordApp() {
     fetchRecords();
   }, []);
 
+  useEffect(() => {
+    try {
+      const storedOptions = window.localStorage.getItem(
+        CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY
+      );
+
+      if (!storedOptions) return;
+
+      const parsedOptions = JSON.parse(storedOptions);
+
+      if (Array.isArray(parsedOptions)) {
+        setCustomDefectiveNoteOptions(
+          getUniqueNoteOptions(parsedOptions.map((item) => String(item)))
+        );
+      }
+    } catch {
+      window.localStorage.removeItem(CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY);
+    }
+  }, []);
+
+  const defectiveNoteOptionsForReport = useMemo(
+    () => getNoteOptionsByInspectionResult(
+      "불량판정",
+      customDefectiveNoteOptions
+    ),
+    [customDefectiveNoteOptions]
+  );
+
   const summary = useMemo(() => {
     const total = records.length;
     const normal = records.filter((r) =>
@@ -959,8 +1022,8 @@ export default function ReturnRecordApp() {
   }, [records, reportDateKeys, reportRange]);
 
   const selectedReportSummary = useMemo(
-    () => buildReportSummary(reportRecords),
-    [reportRecords]
+    () => buildReportSummary(reportRecords, defectiveNoteOptionsForReport),
+    [reportRecords, defectiveNoteOptionsForReport]
   );
 
   const reportOverviewRows = useMemo(() => {
@@ -983,7 +1046,10 @@ export default function ReturnRecordApp() {
         });
       }
 
-      const rangeSummary = buildReportSummary(rangeRecords);
+      const rangeSummary = buildReportSummary(
+        rangeRecords,
+        defectiveNoteOptionsForReport
+      );
 
       return {
         ...option,
@@ -992,7 +1058,7 @@ export default function ReturnRecordApp() {
         defectRate: rangeSummary.defectRate,
       };
     });
-  }, [records, reportDateKeys]);
+  }, [records, reportDateKeys, defectiveNoteOptionsForReport]);
 
   const productFilterOptions = useMemo(() => {
     const productSet = new Set<string>();
@@ -1087,6 +1153,38 @@ export default function ReturnRecordApp() {
     );
   }
 
+  function handleAddDefectiveNoteOption() {
+    const inputValue = window.prompt(
+      "비고 버튼에 추가할 불량 문구를 입력해주세요."
+    );
+    const nextOption = normalizeNoteOptionText(inputValue || "");
+
+    if (!nextOption) return;
+
+    const currentOptions = getNoteOptionsByInspectionResult(
+      "불량판정",
+      customDefectiveNoteOptions
+    );
+
+    if (currentOptions.includes(nextOption)) {
+      setStatusMessage("");
+      setStatusError("이미 등록된 비고 문구입니다.");
+      return;
+    }
+
+    const nextCustomOptions = getUniqueNoteOptions([
+      ...customDefectiveNoteOptions,
+      nextOption,
+    ]);
+
+    setCustomDefectiveNoteOptions(nextCustomOptions);
+    window.localStorage.setItem(
+      CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY,
+      JSON.stringify(nextCustomOptions)
+    );
+    setStatusError("");
+    setStatusMessage(`비고 문구 '${nextOption}'가 추가되었습니다.`);
+  }
 
   function resetForm() {
     setInvoiceNumber("");
@@ -2513,9 +2611,15 @@ export default function ReturnRecordApp() {
 
               <div className="space-y-2">
                 <Label>비고</Label>
-                {getNoteOptionsByInspectionResult(inspectionResult).length > 0 && (
+                {getNoteOptionsByInspectionResult(
+                  inspectionResult,
+                  customDefectiveNoteOptions
+                ).length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {getNoteOptionsByInspectionResult(inspectionResult).map((item) => (
+                    {getNoteOptionsByInspectionResult(
+                      inspectionResult,
+                      customDefectiveNoteOptions
+                    ).map((item) => (
                       <button
                         key={item}
                         type="button"
@@ -2525,6 +2629,17 @@ export default function ReturnRecordApp() {
                         {item}
                       </button>
                     ))}
+
+                    {isDefectiveInspectionResult(inspectionResult) && (
+                      <button
+                        type="button"
+                        onClick={handleAddDefectiveNoteOption}
+                        className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                        title="비고 불량 문구 추가"
+                      >
+                        +
+                      </button>
+                    )}
                   </div>
                 )}
                 <Textarea
@@ -3290,11 +3405,13 @@ export default function ReturnRecordApp() {
                             <div className="space-y-2">
                               <Label>비고</Label>
                               {getNoteOptionsByInspectionResult(
-                                inlineEditDraft.inspectionResult
+                                inlineEditDraft.inspectionResult,
+                                customDefectiveNoteOptions
                               ).length > 0 && (
                                 <div className="flex flex-wrap gap-2">
                                   {getNoteOptionsByInspectionResult(
-                                    inlineEditDraft.inspectionResult
+                                    inlineEditDraft.inspectionResult,
+                                    customDefectiveNoteOptions
                                   ).map((item) => (
                                     <button
                                       key={item}
@@ -3317,6 +3434,19 @@ export default function ReturnRecordApp() {
                                       {item}
                                     </button>
                                   ))}
+
+                                  {isDefectiveInspectionResult(
+                                    inlineEditDraft.inspectionResult
+                                  ) && (
+                                    <button
+                                      type="button"
+                                      onClick={handleAddDefectiveNoteOption}
+                                      className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                                      title="비고 불량 문구 추가"
+                                    >
+                                      +
+                                    </button>
+                                  )}
                                 </div>
                               )}
                               <Textarea

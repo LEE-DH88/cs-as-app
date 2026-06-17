@@ -147,6 +147,26 @@ type TrendPoint = {
   defective: number;
 };
 
+type WeeklyTrendPoint = {
+  weekKey: string;
+  startKey: string;
+  endKey: string;
+  label: string;
+  total: number;
+  normal: number;
+  defective: number;
+};
+
+type TrendSeriesKey = "total" | "normal" | "defective";
+
+type TrendLineSeries = {
+  id: string;
+  label: string;
+  color: string;
+  values: number[];
+  dashed?: boolean;
+};
+
 type ModelInspectionRow = {
   productName: string;
   total: number;
@@ -158,6 +178,7 @@ type ModelInspectionRow = {
   defectRate: number;
   reasons: DefectReasonRow[];
   trendRows: TrendPoint[];
+  weeklyTrendRows: WeeklyTrendPoint[];
 };
 
 const RETURN_TYPES: ReturnType[] = [
@@ -451,6 +472,7 @@ function buildReportSummary(
           (a, b) => b.count - a.count || a.label.localeCompare(b.label, "ko-KR")
         ),
       trendRows: trendMapToRows(value.trendMap),
+      weeklyTrendRows: trendMapToWeeklyRows(value.trendMap),
     }))
     .sort(
       (a, b) =>
@@ -484,6 +506,7 @@ function buildReportSummary(
     modelDefectRows,
     modelInspectionRows,
     overallTrendRows: trendMapToRows(overallTrendMap),
+    overallWeeklyTrendRows: trendMapToWeeklyRows(overallTrendMap),
   };
 }
 function getProcessActionsByInspectionResult(value: InspectionResult): ProcessAction[] {
@@ -647,6 +670,88 @@ function trendMapToRows(
     .sort((a, b) => compareTrendDateKey(a.dateKey, b.dateKey));
 }
 
+function parseDateKeyToDate(dateKey: string) {
+  const match = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) return null;
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function addDaysToDateKey(dateKey: string, days: number) {
+  const date = parseDateKeyToDate(dateKey);
+
+  if (!date) return dateKey;
+
+  date.setDate(date.getDate() + days);
+  return dateToDateKey(date);
+}
+
+function getWeekStartKey(dateKey: string) {
+  const date = parseDateKeyToDate(dateKey);
+
+  if (!date) return dateKey;
+
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + mondayOffset);
+
+  return dateToDateKey(date);
+}
+
+function formatWeeklyTrendLabel(startKey: string, endKey: string) {
+  const startMatch = startKey.match(/^\d{4}-(\d{2})-(\d{2})$/);
+  const endMatch = endKey.match(/^\d{4}-(\d{2})-(\d{2})$/);
+
+  if (!startMatch || !endMatch) return startKey;
+
+  return `${Number(startMatch[1])}/${Number(startMatch[2])}~${Number(endMatch[1])}/${Number(endMatch[2])}`;
+}
+
+function compareWeeklyTrendKey(a: string, b: string) {
+  if (a === b) return 0;
+  if (a === "날짜 미입력") return 1;
+  if (b === "날짜 미입력") return -1;
+  return a.localeCompare(b);
+}
+
+function trendMapToWeeklyRows(
+  trendMap: Map<string, { total: number; normal: number; defective: number }>
+): WeeklyTrendPoint[] {
+  const weeklyMap = new Map<
+    string,
+    { startKey: string; endKey: string; total: number; normal: number; defective: number }
+  >();
+
+  trendMap.forEach((value, dateKey) => {
+    const weekKey = getWeekStartKey(dateKey);
+    const current = weeklyMap.get(weekKey) || {
+      startKey: weekKey,
+      endKey: weekKey === "날짜 미입력" ? weekKey : addDaysToDateKey(weekKey, 6),
+      total: 0,
+      normal: 0,
+      defective: 0,
+    };
+
+    current.total += value.total;
+    current.normal += value.normal;
+    current.defective += value.defective;
+    weeklyMap.set(weekKey, current);
+  });
+
+  return Array.from(weeklyMap.entries())
+    .map(([weekKey, value]) => ({
+      weekKey,
+      startKey: value.startKey,
+      endKey: value.endKey,
+      label: formatWeeklyTrendLabel(value.startKey, value.endKey),
+      total: value.total,
+      normal: value.normal,
+      defective: value.defective,
+    }))
+    .sort((a, b) => compareWeeklyTrendKey(a.weekKey, b.weekKey));
+}
+
 function getReportPeriodLabel(range: ReportRange, keys: ReportDateKeys) {
   if (range === "today") {
     return formatDateKeyKo(keys.todayKey);
@@ -667,6 +772,239 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+const INSPECTION_TREND_SERIES: Array<{
+  key: TrendSeriesKey;
+  label: string;
+  color: string;
+  dashed?: boolean;
+}> = [
+  { key: "total", label: "전체", color: "#0f172a" },
+  { key: "normal", label: "정상", color: "#059669" },
+  { key: "defective", label: "불량", color: "#e11d48" },
+];
+
+const MODEL_TREND_COLORS = [
+  "#0f172a",
+  "#0284c7",
+  "#e11d48",
+  "#059669",
+  "#7c3aed",
+  "#d97706",
+];
+
+function SimpleLineChart({
+  labels,
+  series,
+  height = 220,
+  emptyText,
+}: {
+  labels: string[];
+  series: TrendLineSeries[];
+  height?: number;
+  emptyText: string;
+}) {
+  const hasLabels = labels.length > 0;
+  const hasSeries = series.some((item) => item.values.some((value) => value > 0));
+
+  if (!hasLabels || !hasSeries) {
+    return (
+      <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+        {emptyText}
+      </div>
+    );
+  }
+
+  const width = 720;
+  const padding = { top: 18, right: 24, bottom: 42, left: 44 };
+  const chartHeight = height;
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = chartHeight - padding.top - padding.bottom;
+  const maxValue = Math.max(
+    1,
+    ...series.flatMap((item) => item.values.map((value) => Number(value) || 0))
+  );
+  const yGuides = Array.from(
+    new Set([maxValue, Math.ceil(maxValue / 2), 0])
+  ).sort((a, b) => b - a);
+  const xStep = labels.length <= 1 ? 0 : innerWidth / (labels.length - 1);
+  const labelInterval = labels.length <= 5 ? 1 : Math.ceil(labels.length / 5);
+
+  const getX = (index: number) =>
+    labels.length <= 1 ? padding.left + innerWidth / 2 : padding.left + index * xStep;
+  const getY = (value: number) =>
+    padding.top + innerHeight - (Math.max(0, value) / maxValue) * innerHeight;
+
+  return (
+    <div className="rounded-3xl border border-slate-100 bg-white p-3">
+      <div className="mb-3 flex flex-wrap gap-2">
+        {series.map((item) => (
+          <div key={`legend-${item.id}`} className="flex items-center gap-1.5 text-xs text-slate-500">
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: item.color }}
+            />
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <svg
+        className="w-full overflow-visible"
+        style={{ height: chartHeight }}
+        viewBox={`0 0 ${width} ${chartHeight}`}
+        role="img"
+        aria-label="주간 입고 추이 그래프"
+      >
+        {yGuides.map((guide) => {
+          const y = getY(guide);
+
+          return (
+            <g key={`guide-${guide}`}>
+              <line
+                x1={padding.left}
+                x2={width - padding.right}
+                y1={y}
+                y2={y}
+                stroke="#e2e8f0"
+                strokeWidth="1"
+              />
+              <text
+                x={padding.left - 10}
+                y={y + 4}
+                textAnchor="end"
+                className="fill-slate-400 text-[11px]"
+              >
+                {guide}
+              </text>
+            </g>
+          );
+        })}
+
+        {labels.map((label, index) => {
+          const shouldShowLabel =
+            index === 0 || index === labels.length - 1 || index % labelInterval === 0;
+
+          if (!shouldShowLabel) return null;
+
+          return (
+            <text
+              key={`x-label-${label}-${index}`}
+              x={getX(index)}
+              y={chartHeight - 12}
+              textAnchor="middle"
+              className="fill-slate-500 text-[11px] font-semibold"
+            >
+              {label}
+            </text>
+          );
+        })}
+
+        {series.map((item) => {
+          const points = labels
+            .map((_, index) => `${getX(index)},${getY(item.values[index] || 0)}`)
+            .join(" ");
+
+          return (
+            <g key={`line-${item.id}`}>
+              <polyline
+                fill="none"
+                points={points}
+                stroke={item.color}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="3"
+                strokeDasharray={item.dashed ? "7 6" : undefined}
+              />
+              {labels.map((_, index) => (
+                <circle
+                  key={`dot-${item.id}-${index}`}
+                  cx={getX(index)}
+                  cy={getY(item.values[index] || 0)}
+                  r="4"
+                  fill={item.color}
+                  stroke="white"
+                  strokeWidth="2"
+                />
+              ))}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function WeeklyInspectionTrendChart({
+  rows,
+  maxWeeks = 8,
+}: {
+  rows: WeeklyTrendPoint[];
+  maxWeeks?: number;
+}) {
+  const visibleRows = rows.slice(-maxWeeks);
+  const labels = visibleRows.map((row) => row.label);
+  const series: TrendLineSeries[] = INSPECTION_TREND_SERIES.map((item) => ({
+    id: item.key,
+    label: item.label,
+    color: item.color,
+    dashed: item.dashed,
+    values: visibleRows.map((row) => row[item.key]),
+  }));
+
+  return (
+    <SimpleLineChart
+      labels={labels}
+      series={series}
+      emptyText="선택 기간에 주간 입고 추이 데이터가 없습니다."
+    />
+  );
+}
+
+function ModelWeeklyComparisonChart({
+  modelRows,
+  maxModels = 5,
+  maxWeeks = 8,
+}: {
+  modelRows: ModelInspectionRow[];
+  maxModels?: number;
+  maxWeeks?: number;
+}) {
+  const targetRows = modelRows
+    .filter((row) => row.weeklyTrendRows.length > 0)
+    .slice(0, maxModels);
+
+  const weekLabelMap = new Map<string, string>();
+  targetRows.forEach((row) => {
+    row.weeklyTrendRows.forEach((point) => {
+      weekLabelMap.set(point.weekKey, point.label);
+    });
+  });
+
+  const weekKeys = Array.from(weekLabelMap.keys())
+    .sort(compareWeeklyTrendKey)
+    .slice(-maxWeeks);
+  const labels = weekKeys.map((weekKey) => weekLabelMap.get(weekKey) || weekKey);
+  const series: TrendLineSeries[] = targetRows.map((row, index) => {
+    const valueMap = new Map(
+      row.weeklyTrendRows.map((point) => [point.weekKey, point.total])
+    );
+
+    return {
+      id: row.productName,
+      label: row.productName,
+      color: MODEL_TREND_COLORS[index % MODEL_TREND_COLORS.length],
+      values: weekKeys.map((weekKey) => valueMap.get(weekKey) || 0),
+    };
+  });
+
+  return (
+    <SimpleLineChart
+      labels={labels}
+      series={series}
+      emptyText="선택 기간에 모델별 주간 입고 추이 데이터가 없습니다."
+    />
+  );
+}
 
 function formatNotionProcessDate(value: string) {
   const dateOnly = getDateOnly(value);
@@ -2638,65 +2976,38 @@ export default function ReturnRecordApp() {
                   전체 입고 흐름과 모델별 최근 입고 흐름을 함께 확인합니다.
                 </p>
               </CardHeader>
-              <CardContent className="space-y-5">
+              <CardContent className="space-y-6">
                 <div className="space-y-3">
-                  <p className="text-sm font-bold text-slate-700">전체 입고 추이</p>
-                  {selectedReportSummary.overallTrendRows.length === 0 ? (
-                    <div className="rounded-3xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
-                      선택 기간에 입고 추이 데이터가 없습니다.
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-700">전체 입고 추이</p>
+                      <p className="text-xs text-slate-500">전체 · 정상 · 불량을 1주 단위 선 그래프로 봅니다.</p>
                     </div>
-                  ) : (
-                    selectedReportSummary.overallTrendRows.slice(-8).map((point) => {
-                      const trendPercent = calculatePercent(point.total, selectedReportSummary.total || point.total);
-
-                      return (
-                        <div key={`dashboard-overall-trend-${point.dateKey}`} className="space-y-1">
-                          <div className="flex items-center justify-between text-xs text-slate-500">
-                            <span className="font-semibold text-slate-700">{point.label}</span>
-                            <span>
-                              전체 {point.total}건 · 정상 {point.normal}건 · 불량 {point.defective}건
-                            </span>
-                          </div>
-                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                            <div
-                              className="h-full rounded-full bg-slate-800 transition-all"
-                              style={{ width: `${Math.max(trendPercent, point.total > 0 ? 4 : 0)}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
+                    <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                      주간 그래프
+                    </span>
+                  </div>
+                  <WeeklyInspectionTrendChart
+                    rows={selectedReportSummary.overallWeeklyTrendRows}
+                    maxWeeks={8}
+                  />
                 </div>
 
-                <div className="space-y-3 border-t pt-4">
-                  <p className="text-sm font-bold text-slate-700">모델별 입고 추이</p>
-                  {selectedReportSummary.modelInspectionRows.length === 0 ? (
-                    <div className="rounded-3xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
-                      선택 기간에 모델별 추이 데이터가 없습니다.
+                <div className="space-y-3 border-t pt-5">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-700">모델별 입고 추이</p>
+                      <p className="text-xs text-slate-500">입고량 상위 모델을 1주 단위로 비교합니다.</p>
                     </div>
-                  ) : (
-                    selectedReportSummary.modelInspectionRows.slice(0, 6).map((row) => (
-                      <div key={`dashboard-model-trend-${row.productName}`} className="rounded-3xl border border-slate-100 bg-slate-50 p-3">
-                        <div className="flex items-center justify-between gap-3 text-sm">
-                          <span className="min-w-0 truncate font-semibold text-slate-800">
-                            {row.productName}
-                          </span>
-                          <span className="shrink-0 text-xs text-slate-500">총 {row.total}건</span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {row.trendRows.slice(-6).map((point) => (
-                            <span
-                              key={`dashboard-model-trend-${row.productName}-${point.dateKey}`}
-                              className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600"
-                            >
-                              {point.label} {point.total}건
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))
-                  )}
+                    <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                      상위 5개 모델
+                    </span>
+                  </div>
+                  <ModelWeeklyComparisonChart
+                    modelRows={selectedReportSummary.modelInspectionRows}
+                    maxModels={5}
+                    maxWeeks={8}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -2824,7 +3135,7 @@ export default function ReturnRecordApp() {
                     모델별 입고 추이
                   </CardTitle>
                   <p className="text-sm text-slate-500">
-                    등록일자 기준으로 모델별 입고 흐름을 확인합니다.
+등록일자 기준으로 모델별 입고 흐름을 1주 단위 그래프로 확인합니다.
                   </p>
                 </CardHeader>
                 <CardContent>
@@ -2845,27 +3156,8 @@ export default function ReturnRecordApp() {
                               총 {row.total}건 · 정상 {row.normal}건 · 불량 {row.defective}건
                             </p>
                           </div>
-                          <div className="mt-3 space-y-2">
-                            {row.trendRows.slice(-10).map((point) => {
-                              const pointPercent = calculatePercent(point.total, row.total || point.total);
-
-                              return (
-                                <div key={`model-report-trend-${row.productName}-${point.dateKey}`} className="space-y-1">
-                                  <div className="flex items-center justify-between text-xs text-slate-500">
-                                    <span className="font-semibold text-slate-700">{point.label}</span>
-                                    <span>
-                                      전체 {point.total}건 · 정상 {point.normal}건 · 불량 {point.defective}건
-                                    </span>
-                                  </div>
-                                  <div className="h-2 overflow-hidden rounded-full bg-white">
-                                    <div
-                                      className="h-full rounded-full bg-slate-800 transition-all"
-                                      style={{ width: `${Math.max(pointPercent, point.total > 0 ? 4 : 0)}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              );
-                            })}
+                          <div className="mt-4">
+                            <WeeklyInspectionTrendChart rows={row.weeklyTrendRows} maxWeeks={8} />
                           </div>
                         </div>
                       ))}

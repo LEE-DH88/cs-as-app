@@ -112,11 +112,13 @@ type OcrParsedResult = {
   rawText?: string;
 };
 
-type ReportRange = "today" | "week" | "all";
+type ReportRange = "all" | "month" | "week" | "today";
 type ActivePanel = "dashboard" | "modelReport" | "records" | "form";
 
 type ReportDateKeys = {
   todayKey: string;
+  monthStartKey: string;
+  monthEndKey: string;
   weekStartKey: string;
   weekEndKey: string;
 };
@@ -256,9 +258,10 @@ const REPORT_RANGE_OPTIONS: {
   label: string;
   description: string;
 }[] = [
-  { value: "today", label: "오늘", description: "금일 검수" },
+  { value: "all", label: "전체기록", description: "누적 데이터" },
+  { value: "month", label: "이번달", description: "1일~오늘" },
   { value: "week", label: "이번주", description: "월요일~일요일" },
-  { value: "all", label: "전체", description: "누적 데이터" },
+  { value: "today", label: "오늘", description: "금일 검수" },
 ];
 
 function normalizeInspectionResult(value: InspectionResult): InspectionResult {
@@ -618,6 +621,9 @@ function getCurrentReportDateKeys(): ReportDateKeys {
   const todayStart = new Date(today);
   todayStart.setHours(0, 0, 0, 0);
 
+  const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
+  const monthEnd = new Date(todayStart.getFullYear(), todayStart.getMonth() + 1, 0);
+
   const weekStart = new Date(todayStart);
   const day = weekStart.getDay();
   const mondayOffset = day === 0 ? -6 : 1 - day;
@@ -628,6 +634,8 @@ function getCurrentReportDateKeys(): ReportDateKeys {
 
   return {
     todayKey: dateToDateKey(todayStart),
+    monthStartKey: dateToDateKey(monthStart),
+    monthEndKey: dateToDateKey(monthEnd),
     weekStartKey: dateToDateKey(weekStart),
     weekEndKey: dateToDateKey(weekEnd),
   };
@@ -780,6 +788,10 @@ function getReportPeriodLabel(range: ReportRange, keys: ReportDateKeys) {
     )}`;
   }
 
+  if (range === "month") {
+    return `${formatDateKeyKo(keys.monthStartKey)} ~ ${formatDateKeyKo(keys.todayKey)}`;
+  }
+
   return "저장된 전체 기록";
 }
 
@@ -812,7 +824,7 @@ const MODEL_TREND_COLORS = [
 function SimpleLineChart({
   labels,
   series,
-  height = 220,
+  height = 260,
   emptyText,
 }: {
   labels: string[];
@@ -831,8 +843,8 @@ function SimpleLineChart({
     );
   }
 
-  const width = 720;
-  const padding = { top: 18, right: 24, bottom: 42, left: 44 };
+  const width = 760;
+  const padding = { top: 54, right: 36, bottom: 46, left: 48 };
   const chartHeight = height;
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = chartHeight - padding.top - padding.bottom;
@@ -844,7 +856,7 @@ function SimpleLineChart({
     new Set([maxValue, Math.ceil(maxValue / 2), 0])
   ).sort((a, b) => b - a);
   const xStep = labels.length <= 1 ? 0 : innerWidth / (labels.length - 1);
-  const labelInterval = labels.length <= 5 ? 1 : Math.ceil(labels.length / 5);
+  const labelInterval = labels.length <= 8 ? 1 : Math.ceil(labels.length / 6);
 
   const getX = (index: number) =>
     labels.length <= 1 ? padding.left + innerWidth / 2 : padding.left + index * xStep;
@@ -852,10 +864,10 @@ function SimpleLineChart({
     padding.top + innerHeight - (Math.max(0, value) / maxValue) * innerHeight;
 
   return (
-    <div className="rounded-3xl border border-slate-100 bg-white p-3">
+    <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white p-4">
       <div className="mb-3 flex flex-wrap gap-2">
         {series.map((item) => (
-          <div key={`legend-${item.id}`} className="flex items-center gap-1.5 text-xs text-slate-500">
+          <div key={`legend-${item.id}`} className="flex items-center gap-1.5 rounded-full bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">
             <span
               className="h-2.5 w-2.5 rounded-full"
               style={{ backgroundColor: item.color }}
@@ -889,7 +901,7 @@ function SimpleLineChart({
                 x={padding.left - 10}
                 y={y + 4}
                 textAnchor="end"
-                className="fill-slate-400 text-[11px]"
+                className="fill-slate-400 text-[11px] font-semibold"
               >
                 {guide}
               </text>
@@ -907,9 +919,9 @@ function SimpleLineChart({
             <text
               key={`x-label-${label}-${index}`}
               x={getX(index)}
-              y={chartHeight - 12}
+              y={chartHeight - 14}
               textAnchor="middle"
-              className="fill-slate-500 text-[11px] font-semibold"
+              className="fill-slate-600 text-[11px] font-bold"
             >
               {label}
             </text>
@@ -929,7 +941,7 @@ function SimpleLineChart({
                 stroke={item.color}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth="3"
+                strokeWidth="3.5"
                 strokeDasharray={item.dashed ? "7 6" : undefined}
               />
               {labels.map((_, index) => {
@@ -940,10 +952,10 @@ function SimpleLineChart({
                     key={`dot-${item.id}-${index}`}
                     cx={getX(index)}
                     cy={getY(value)}
-                    r="4"
+                    r="4.5"
                     fill={item.color}
                     stroke="white"
-                    strokeWidth="2"
+                    strokeWidth="2.5"
                   />
                 );
               })}
@@ -953,16 +965,41 @@ function SimpleLineChart({
 
                 if (!shouldShowValue) return null;
 
+                const labelText = String(value);
+                const labelWidth = Math.max(28, 18 + labelText.length * 8);
+                const seriesOffset = series.length > 1 ? (seriesIndex - (series.length - 1) / 2) * 13 : 0;
+                const rawLabelX = getX(index) + seriesOffset;
+                const labelX = Math.min(
+                  width - padding.right - labelWidth / 2,
+                  Math.max(padding.left + labelWidth / 2, rawLabelX)
+                );
+                const labelY = Math.max(
+                  16,
+                  getY(value) - 16 - (seriesIndex % 4) * 18
+                );
+
                 return (
-                  <text
-                    key={`value-${item.id}-${index}`}
-                    x={getX(index)}
-                    y={Math.max(10, getY(value) - 8 - (seriesIndex % 4) * 12)}
-                    textAnchor="middle"
-                    className="fill-slate-700 text-[11px] font-bold"
-                  >
-                    {value}
-                  </text>
+                  <g key={`value-${item.id}-${index}`}>
+                    <rect
+                      x={labelX - labelWidth / 2}
+                      y={labelY - 13}
+                      width={labelWidth}
+                      height="20"
+                      rx="10"
+                      fill="white"
+                      stroke={item.color}
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x={labelX}
+                      y={labelY + 2}
+                      textAnchor="middle"
+                      fill={item.color}
+                      className="text-[13px] font-black"
+                    >
+                      {labelText}
+                    </text>
+                  </g>
                 );
               })}
             </g>
@@ -972,7 +1009,6 @@ function SimpleLineChart({
     </div>
   );
 }
-
 function DailyInspectionTrendChart({
   rows,
   startKey,
@@ -1497,7 +1533,7 @@ export default function ReturnRecordApp() {
   const [filterResult, setFilterResult] = useState<string>("전체");
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [reportRange, setReportRange] = useState<ReportRange>("today");
+  const [reportRange, setReportRange] = useState<ReportRange>("all");
   const [activePanel, setActivePanel] = useState<ActivePanel>("form");
 
   const [statusMessage, setStatusMessage] = useState<string>("");
@@ -1668,11 +1704,15 @@ export default function ReturnRecordApp() {
     const startDate =
       reportRange === "today"
         ? reportDateKeys.todayKey
-        : reportDateKeys.weekStartKey;
+        : reportRange === "month"
+          ? reportDateKeys.monthStartKey
+          : reportDateKeys.weekStartKey;
     const endDate =
       reportRange === "today"
         ? reportDateKeys.todayKey
-        : reportDateKeys.weekEndKey;
+        : reportRange === "month"
+          ? reportDateKeys.monthEndKey
+          : reportDateKeys.weekEndKey;
 
     return records.filter((record) => {
       const recordDate = getDateOnly(record.createdAt);
@@ -1693,11 +1733,15 @@ export default function ReturnRecordApp() {
         const startDate =
           option.value === "today"
             ? reportDateKeys.todayKey
-            : reportDateKeys.weekStartKey;
+            : option.value === "month"
+              ? reportDateKeys.monthStartKey
+              : reportDateKeys.weekStartKey;
         const endDate =
           option.value === "today"
             ? reportDateKeys.todayKey
-            : reportDateKeys.weekEndKey;
+            : option.value === "month"
+              ? reportDateKeys.monthEndKey
+              : reportDateKeys.weekEndKey;
 
         rangeRecords = records.filter((record) => {
           const recordDate = getDateOnly(record.createdAt);
@@ -2705,17 +2749,17 @@ export default function ReturnRecordApp() {
         <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="lg:sticky lg:top-6 lg:self-start">
             <Card className="overflow-hidden rounded-[2rem] border-slate-200 bg-white shadow-sm">
-              <CardContent className="space-y-5 p-4">
+              <CardContent className="space-y-4 p-4">
                 <div className="rounded-3xl bg-slate-950 p-5 text-white">
                   <h2 className="mt-2 text-xl font-bold">업무 대시보드</h2>
                   <p className="mt-2 text-xs leading-5 text-slate-400">
-                    등록부터 보고까지 필요한 화면만 빠르게 선택합니다.
+                    등록 · 조회 · 현황 · 리포트만 빠르게 이동합니다.
                   </p>
                 </div>
 
                 <div className="space-y-2">
                   <p className="px-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                    빠른 업무
+                    메뉴
                   </p>
                   <button
                     type="button"
@@ -2752,51 +2796,34 @@ export default function ReturnRecordApp() {
                     </span>
                     <Search className="h-4 w-4" />
                   </button>
-                </div>
 
-                <div className="space-y-2">
-                  <p className="px-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                    AS 검수 현황판
-                  </p>
-                  {REPORT_RANGE_OPTIONS.map((option) => {
-                    const isActive = activePanel === "dashboard" && reportRange === option.value;
-                    return (
-                      <button
-                        key={`sidebar-${option.value}`}
-                        type="button"
-                        onClick={() => {
-                          setActivePanel("dashboard");
-                          setReportRange(option.value);
-                        }}
-                        className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
-                          isActive
-                            ? "border-slate-900 bg-slate-900 text-white shadow-sm"
-                            : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white"
-                        }`}
-                      >
-                        <span>
-                          <span className="block text-sm font-bold">{option.label}</span>
-                          <span className={`block text-xs ${isActive ? "text-slate-300" : "text-slate-500"}`}>
-                            {option.description}
-                          </span>
-                        </span>
-                        <span className={`rounded-full px-2 py-1 text-xs font-bold ${
-                          isActive ? "bg-white text-slate-950" : "bg-white text-slate-500"
-                        }`}>
-                          {reportOverviewRows.find((row) => row.value === option.value)?.total || 0}건
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="space-y-2">
-                  <p className="px-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                    분석 리포트
-                  </p>
                   <button
                     type="button"
-                    onClick={() => setActivePanel("modelReport")}
+                    onClick={() => {
+                      setActivePanel("dashboard");
+                      setReportRange("all");
+                    }}
+                    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
+                      activePanel === "dashboard"
+                        ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>
+                      <span className="block text-sm font-bold">검수 현황판</span>
+                      <span className={`block text-xs ${activePanel === "dashboard" ? "text-slate-300" : "text-slate-500"}`}>
+                        전체 · 이번달 · 이번주 · 오늘
+                      </span>
+                    </span>
+                    <ClipboardList className="h-4 w-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivePanel("modelReport");
+                      setReportRange("all");
+                    }}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "modelReport"
                         ? "border-rose-600 bg-rose-600 text-white shadow-sm"
@@ -2806,7 +2833,7 @@ export default function ReturnRecordApp() {
                     <span>
                       <span className="block text-sm font-bold">모델별 불량 리포트</span>
                       <span className={`block text-xs ${activePanel === "modelReport" ? "text-rose-100" : "text-slate-500"}`}>
-                        제품별 불량 사유 분석
+                        전체 · 이번달 · 이번주 · 오늘
                       </span>
                     </span>
                     <Smartphone className="h-4 w-4" />
@@ -2893,7 +2920,7 @@ export default function ReturnRecordApp() {
                     <div>
                       <p className="text-sm font-semibold text-slate-300">기간별 요약</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        오늘 · 이번주 · 전체 흐름을 한 번에 확인합니다.
+                        전체 · 이번달 · 이번주 · 오늘 흐름을 한 번에 확인합니다.
                       </p>
                     </div>
                     <ClipboardList className="h-8 w-8 text-slate-600" />
@@ -3094,8 +3121,10 @@ export default function ReturnRecordApp() {
                   </CardTitle>
                   <p className="text-sm text-slate-500">
                     {reportRange === "week"
-                      ? "이번주는 일별 흐름으로, 전체는 주별 흐름으로 확인합니다."
-                      : "전체 누적 데이터의 주별 입고 흐름을 확인합니다."}
+                      ? "이번주는 일별 흐름을 숫자 라벨과 함께 확인합니다."
+                      : reportRange === "month"
+                        ? "이번달은 일별 흐름을 숫자 라벨과 함께 확인합니다."
+                        : "전체 누적 데이터는 주별 입고 흐름을 숫자 라벨과 함께 확인합니다."}
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -3104,25 +3133,25 @@ export default function ReturnRecordApp() {
                       <div>
                         <p className="text-sm font-bold text-slate-700">전체 입고 추이</p>
                         <p className="text-xs text-slate-500">
-                          {reportRange === "week"
-                            ? "전체 · 정상 · 불량을 일별 그래프로 봅니다."
-                            : "전체 · 정상 · 불량을 주별 그래프로 봅니다."}
+                          {reportRange === "all"
+                            ? "전체 · 정상 · 불량을 주별 그래프로 봅니다."
+                            : "전체 · 정상 · 불량을 일별 그래프로 봅니다."}
                         </p>
                       </div>
                       <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                        {reportRange === "week" ? "일별 그래프" : "주별 그래프"}
+                        {reportRange === "all" ? "주별 그래프" : "일별 그래프"}
                       </span>
                     </div>
-                    {reportRange === "week" ? (
-                      <DailyInspectionTrendChart
-                        rows={selectedReportSummary.overallTrendRows}
-                        startKey={reportDateKeys.weekStartKey}
-                        endKey={reportDateKeys.weekEndKey}
-                      />
-                    ) : (
+                    {reportRange === "all" ? (
                       <WeeklyInspectionTrendChart
                         rows={selectedReportSummary.overallWeeklyTrendRows}
                         maxWeeks={8}
+                      />
+                    ) : (
+                      <DailyInspectionTrendChart
+                        rows={selectedReportSummary.overallTrendRows}
+                        startKey={reportRange === "month" ? reportDateKeys.monthStartKey : reportDateKeys.weekStartKey}
+                        endKey={reportRange === "month" ? reportDateKeys.todayKey : reportDateKeys.weekEndKey}
                       />
                     )}
                   </div>
@@ -3134,25 +3163,27 @@ export default function ReturnRecordApp() {
                         <p className="text-xs text-slate-500">
                           {reportRange === "week"
                             ? "입고량 상위 3개 모델을 일별 그래프로 비교합니다."
-                            : "입고량 상위 5개 모델을 주별 그래프로 비교합니다."}
+                            : reportRange === "month"
+                              ? "입고량 상위 5개 모델을 일별 그래프로 비교합니다."
+                              : "입고량 상위 5개 모델을 주별 그래프로 비교합니다."}
                         </p>
                       </div>
                       <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
                         {reportRange === "week" ? "상위 3개 모델" : "상위 5개 모델"}
                       </span>
                     </div>
-                    {reportRange === "week" ? (
-                      <ModelDailyComparisonChart
-                        modelRows={selectedReportSummary.modelInspectionRows}
-                        startKey={reportDateKeys.weekStartKey}
-                        endKey={reportDateKeys.weekEndKey}
-                        maxModels={3}
-                      />
-                    ) : (
+                    {reportRange === "all" ? (
                       <ModelWeeklyComparisonChart
                         modelRows={selectedReportSummary.modelInspectionRows}
                         maxModels={5}
                         maxWeeks={8}
+                      />
+                    ) : (
+                      <ModelDailyComparisonChart
+                        modelRows={selectedReportSummary.modelInspectionRows}
+                        startKey={reportRange === "month" ? reportDateKeys.monthStartKey : reportDateKeys.weekStartKey}
+                        endKey={reportRange === "month" ? reportDateKeys.todayKey : reportDateKeys.weekEndKey}
+                        maxModels={reportRange === "week" ? 3 : 5}
                       />
                     )}
                   </div>
@@ -3286,27 +3317,29 @@ export default function ReturnRecordApp() {
                     <p className="text-sm text-slate-500">
                       {reportRange === "week"
                         ? "이번주는 등록일자 기준 일별 입고 흐름을 상위 3개 모델로 확인합니다."
-                        : "전체 누적 데이터는 등록일자 기준 주별 입고 흐름을 상위 5개 모델로 확인합니다."}
+                        : reportRange === "month"
+                          ? "이번달은 등록일자 기준 일별 입고 흐름을 상위 5개 모델로 확인합니다."
+                          : "전체 누적 데이터는 등록일자 기준 주별 입고 흐름을 상위 5개 모델로 확인합니다."}
                     </p>
                   </CardHeader>
                   <CardContent>
                     <div className="mb-3 flex justify-end">
                       <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                        {reportRange === "week" ? "상위 3개 모델 · 일별" : "상위 5개 모델 · 주별"}
+                        {reportRange === "all" ? "상위 5개 모델 · 주별" : reportRange === "week" ? "상위 3개 모델 · 일별" : "상위 5개 모델 · 일별"}
                       </span>
                     </div>
-                    {reportRange === "week" ? (
-                      <ModelDailyComparisonChart
-                        modelRows={selectedReportSummary.modelInspectionRows}
-                        startKey={reportDateKeys.weekStartKey}
-                        endKey={reportDateKeys.weekEndKey}
-                        maxModels={3}
-                      />
-                    ) : (
+                    {reportRange === "all" ? (
                       <ModelWeeklyComparisonChart
                         modelRows={selectedReportSummary.modelInspectionRows}
                         maxModels={5}
                         maxWeeks={8}
+                      />
+                    ) : (
+                      <ModelDailyComparisonChart
+                        modelRows={selectedReportSummary.modelInspectionRows}
+                        startKey={reportRange === "month" ? reportDateKeys.monthStartKey : reportDateKeys.weekStartKey}
+                        endKey={reportRange === "month" ? reportDateKeys.todayKey : reportDateKeys.weekEndKey}
+                        maxModels={reportRange === "week" ? 3 : 5}
                       />
                     )}
                   </CardContent>

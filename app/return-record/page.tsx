@@ -167,6 +167,12 @@ type ComboChartRow = {
   defective: number;
 };
 
+type ModelTrendChartRow = {
+  id: string;
+  label: string;
+  values: Record<string, number>;
+};
+
 type ModelInspectionRow = {
   productName: string;
   total: number;
@@ -710,6 +716,25 @@ function getDateKeyRange(startKey: string, endKey: string) {
   return rows;
 }
 
+function getWeekKeyRange(startKey: string, endKey: string) {
+  const startWeekKey = getWeekStartKey(startKey);
+  const endWeekKey = getWeekStartKey(endKey);
+  const startDate = parseDateKeyToDate(startWeekKey);
+  const endDate = parseDateKeyToDate(endWeekKey);
+
+  if (!startDate || !endDate || startDate > endDate) return [];
+
+  const rows: string[] = [];
+  const current = new Date(startDate);
+
+  while (current <= endDate) {
+    rows.push(dateToDateKey(current));
+    current.setDate(current.getDate() + 7);
+  }
+
+  return rows;
+}
+
 function getWeekStartKey(dateKey: string) {
   const date = parseDateKeyToDate(dateKey);
 
@@ -808,6 +833,29 @@ const CHART_SERIES_LABELS = [
   { key: "total", label: "전체", color: CHART_TOTAL_COLOR },
   { key: "normal", label: "정상", color: CHART_NORMAL_COLOR },
   { key: "defective", label: "불량", color: CHART_DEFECT_COLOR },
+] as const;
+
+const PRIMARY_MODEL_TREND_SERIES = [
+  {
+    key: "(분리형) 휴대용분유포트",
+    label: "(분리형) 휴대용분유포트",
+    color: "#0f172a",
+  },
+  {
+    key: "휴대용분유포트",
+    label: "휴대용분유포트",
+    color: "#0284c7",
+  },
+  {
+    key: "분유쉐이커",
+    label: "분유쉐이커",
+    color: "#e11d48",
+  },
+  {
+    key: "LED분유쉐이커",
+    label: "LED분유쉐이커",
+    color: "#7c3aed",
+  },
 ] as const;
 
 function getChartLabelLines(label: string) {
@@ -1128,29 +1176,260 @@ function WeeklyInspectionTrendChart({
   );
 }
 
-function ModelInspectionComparisonChart({
-  modelRows,
-  maxModels = 5,
+function buildDailyModelTrendRows(
+  modelRows: ModelInspectionRow[],
+  startKey: string,
+  endKey: string
+): ModelTrendChartRow[] {
+  const modelMap = new Map(modelRows.map((row) => [row.productName, row]));
+  const dateKeys = getDateKeyRange(startKey, endKey);
+
+  return dateKeys.map((dateKey) => {
+    const values: Record<string, number> = {};
+
+    PRIMARY_MODEL_TREND_SERIES.forEach((series) => {
+      const modelRow = modelMap.get(series.key);
+      const trendRow = modelRow?.trendRows.find((row) => row.dateKey === dateKey);
+      values[series.key] = trendRow?.total || 0;
+    });
+
+    return {
+      id: dateKey,
+      label: formatTrendDateLabel(dateKey),
+      values,
+    };
+  });
+}
+
+function getModelTrendDateBounds(modelRows: ModelInspectionRow[]) {
+  const dateKeys = modelRows
+    .filter((row) => PRIMARY_MODEL_TREND_SERIES.some((series) => series.key === row.productName))
+    .flatMap((row) => row.trendRows.map((trendRow) => trendRow.dateKey))
+    .filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
+    .sort(compareTrendDateKey);
+
+  if (dateKeys.length === 0) return null;
+
+  return {
+    startKey: dateKeys[0],
+    endKey: dateKeys[dateKeys.length - 1],
+  };
+}
+
+function buildWeeklyModelTrendRows(
+  modelRows: ModelInspectionRow[],
+  startKey?: string,
+  endKey?: string
+): ModelTrendChartRow[] {
+  const modelMap = new Map(modelRows.map((row) => [row.productName, row]));
+  const bounds = startKey && endKey ? { startKey, endKey } : getModelTrendDateBounds(modelRows);
+
+  if (!bounds) return [];
+
+  const weekKeys = getWeekKeyRange(bounds.startKey, bounds.endKey);
+
+  return weekKeys.map((weekKey) => {
+    const values: Record<string, number> = {};
+
+    PRIMARY_MODEL_TREND_SERIES.forEach((series) => {
+      const modelRow = modelMap.get(series.key);
+      const weeklyRow = modelRow?.weeklyTrendRows.find((row) => row.weekKey === weekKey);
+      values[series.key] = weeklyRow?.total || 0;
+    });
+
+    return {
+      id: weekKey,
+      label: formatWeeklyTrendLabel(weekKey, addDaysToDateKey(weekKey, 6)),
+      values,
+    };
+  });
+}
+
+function ModelTrendGroupedBarChart({
+  rows,
+  emptyText,
+  height = 360,
 }: {
-  modelRows: ModelInspectionRow[];
-  maxModels?: number;
+  rows: ModelTrendChartRow[];
+  emptyText: string;
+  height?: number;
 }) {
-  const visibleRows: ComboChartRow[] = modelRows
-    .filter((row) => row.total > 0)
-    .slice(0, maxModels)
-    .map((row) => ({
-      id: row.productName,
-      label: row.productName,
-      total: row.total,
-      normal: row.normal,
-      defective: row.defective,
-    }));
+  const hasAnyValue = rows.some((row) =>
+    PRIMARY_MODEL_TREND_SERIES.some((series) => (row.values[series.key] || 0) > 0)
+  );
+
+  if (!hasAnyValue) {
+    return (
+      <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+        {emptyText}
+      </div>
+    );
+  }
+
+  const visibleRows = rows;
+  const width = Math.max(860, visibleRows.length * 126 + 128);
+  const padding = { top: 48, right: 34, bottom: 78, left: 52 };
+  const chartHeight = height;
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = chartHeight - padding.top - padding.bottom;
+  const maxCount = Math.max(
+    1,
+    ...visibleRows.flatMap((row) =>
+      PRIMARY_MODEL_TREND_SERIES.map((series) => row.values[series.key] || 0)
+    )
+  );
+  const yGuides = Array.from(new Set([maxCount, Math.ceil(maxCount / 2), 0])).sort(
+    (a, b) => b - a
+  );
+  const groupWidth = innerWidth / visibleRows.length;
+  const barGap = visibleRows.length >= 8 ? 3 : 5;
+  const barWidth = Math.max(
+    8,
+    Math.min(
+      18,
+      (Math.min(groupWidth * 0.78, 92) - barGap * (PRIMARY_MODEL_TREND_SERIES.length - 1)) /
+        PRIMARY_MODEL_TREND_SERIES.length
+    )
+  );
+  const minBarHeight = 4;
+
+  const getX = (index: number) => padding.left + groupWidth * index + groupWidth / 2;
+  const getCountY = (value: number) =>
+    padding.top + innerHeight - (Math.max(0, value) / maxCount) * innerHeight;
 
   return (
-    <ComboBarRateChart
-      rows={visibleRows}
-      height={360}
-      emptyText="선택 기간에 모델별 입고 데이터가 없습니다."
+    <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white p-4">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {PRIMARY_MODEL_TREND_SERIES.map((item) => (
+          <div key={`model-trend-legend-${item.key}`} className="flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-600">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="overflow-x-auto pb-2">
+        <svg
+          className="overflow-visible"
+          style={{ width, height: chartHeight }}
+          viewBox={`0 0 ${width} ${chartHeight}`}
+          role="img"
+          aria-label="모델별 입고 추이 막대 그래프"
+        >
+          {yGuides.map((guide) => {
+            const y = getCountY(guide);
+
+            return (
+              <g key={`model-count-guide-${guide}`}>
+                <line
+                  x1={padding.left}
+                  x2={width - padding.right}
+                  y1={y}
+                  y2={y}
+                  stroke="#e2e8f0"
+                  strokeWidth="1"
+                />
+                <text
+                  x={padding.left - 10}
+                  y={y + 4}
+                  textAnchor="end"
+                  className="fill-slate-400 text-[11px] font-bold"
+                >
+                  {guide}
+                </text>
+              </g>
+            );
+          })}
+
+          {visibleRows.map((row, index) => {
+            const centerX = getX(index);
+            const totalSeriesWidth =
+              barWidth * PRIMARY_MODEL_TREND_SERIES.length +
+              barGap * (PRIMARY_MODEL_TREND_SERIES.length - 1);
+            const startX = centerX - totalSeriesWidth / 2 + barWidth / 2;
+            const labelLines = getChartLabelLines(row.label);
+
+            return (
+              <g key={`model-trend-group-${row.id}-${index}`}>
+                {PRIMARY_MODEL_TREND_SERIES.map((series, seriesIndex) => {
+                  const value = row.values[series.key] || 0;
+                  const rawHeight = (value / maxCount) * innerHeight;
+                  const barHeight = value > 0 ? Math.max(minBarHeight, rawHeight) : 0;
+                  const x = startX + seriesIndex * (barWidth + barGap);
+                  const y = padding.top + innerHeight - barHeight;
+
+                  return (
+                    <g key={`model-trend-bar-${row.id}-${series.key}`}>
+                      <rect
+                        x={x - barWidth / 2}
+                        y={y}
+                        width={barWidth}
+                        height={barHeight}
+                        rx="5"
+                        fill={series.color}
+                        opacity="0.9"
+                      />
+                      {value > 0 && (
+                        <text
+                          x={x}
+                          y={Math.max(14, y - 7)}
+                          textAnchor="middle"
+                          className="fill-slate-900 text-[12px] font-black"
+                        >
+                          {value}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+
+                <text
+                  x={centerX}
+                  y={chartHeight - 40}
+                  textAnchor="middle"
+                  className="fill-slate-600 text-[11px] font-bold"
+                >
+                  {labelLines.map((line, lineIndex) => (
+                    <tspan key={`model-trend-label-${row.id}-${lineIndex}`} x={centerX} dy={lineIndex === 0 ? 0 : 14}>
+                      {line}
+                    </tspan>
+                  ))}
+                </text>
+                <title>
+                  {`${row.label} · ${PRIMARY_MODEL_TREND_SERIES.map(
+                    (series) => `${series.label} ${row.values[series.key] || 0}건`
+                  ).join(" · ")}`}
+                </title>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function ModelInspectionComparisonChart({
+  modelRows,
+  range,
+  dateKeys,
+}: {
+  modelRows: ModelInspectionRow[];
+  range: ReportRange;
+  dateKeys: ReportDateKeys;
+}) {
+  const chartRows =
+    range === "week"
+      ? buildDailyModelTrendRows(modelRows, dateKeys.weekStartKey, dateKeys.todayKey)
+      : range === "month"
+        ? buildWeeklyModelTrendRows(modelRows, dateKeys.monthStartKey, dateKeys.todayKey)
+        : buildWeeklyModelTrendRows(modelRows);
+
+  return (
+    <ModelTrendGroupedBarChart
+      rows={chartRows}
+      height={range === "week" ? 350 : 370}
+      emptyText="선택 기간에 주요 4개 모델 입고 데이터가 없습니다."
     />
   );
 }
@@ -3156,17 +3435,18 @@ export default function ReturnRecordApp() {
                         <p className="text-sm font-bold text-slate-700">모델별 입고 추이</p>
                         <p className="text-xs text-slate-500">
                           {reportRange === "week"
-                            ? "입고량 상위 3개 모델의 전체 · 정상 · 불량 건수를 비교합니다."
-                            : "입고량 상위 5개 모델의 전체 · 정상 · 불량 건수를 비교합니다."}
+                            ? "4개 주요 모델의 일별 입고량 변화를 비교합니다."
+                            : "4개 주요 모델의 주별 입고량 변화를 비교합니다."}
                         </p>
                       </div>
                       <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                        {reportRange === "week" ? "상위 3개 모델" : "상위 5개 모델"}
+                        {reportRange === "week" ? "4개 주요 모델 · 일별" : "4개 주요 모델 · 주별"}
                       </span>
                     </div>
                     <ModelInspectionComparisonChart
                       modelRows={selectedReportSummary.modelInspectionRows}
-                      maxModels={reportRange === "week" ? 3 : 5}
+                      range={reportRange}
+                      dateKeys={reportDateKeys}
                     />
                   </div>
                 </CardContent>
@@ -3298,19 +3578,20 @@ export default function ReturnRecordApp() {
                     </CardTitle>
                     <p className="text-sm text-slate-500">
                       {reportRange === "week"
-                        ? "이번주는 입고량 상위 3개 모델의 전체 · 정상 · 불량 건수를 비교합니다."
-                        : "선택 기간 입고량 상위 5개 모델의 전체 · 정상 · 불량 건수를 비교합니다."}
+                        ? "이번주는 4개 주요 모델의 일별 입고량 변화를 확인합니다."
+                        : "전체기록과 이번달은 4개 주요 모델의 주별 입고량 변화를 확인합니다."}
                     </p>
                   </CardHeader>
                   <CardContent>
                     <div className="mb-3 flex justify-end">
                       <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                        {reportRange === "week" ? "상위 3개 모델" : "상위 5개 모델"}
+                        {reportRange === "week" ? "4개 주요 모델 · 일별" : "4개 주요 모델 · 주별"}
                       </span>
                     </div>
                     <ModelInspectionComparisonChart
                       modelRows={selectedReportSummary.modelInspectionRows}
-                      maxModels={reportRange === "week" ? 3 : 5}
+                      range={reportRange}
+                      dateKeys={reportDateKeys}
                     />
                   </CardContent>
                 </Card>

@@ -159,14 +159,12 @@ type WeeklyTrendPoint = {
   defective: number;
 };
 
-type TrendSeriesKey = "total" | "normal" | "defective";
-
-type TrendLineSeries = {
+type ComboChartRow = {
   id: string;
   label: string;
-  color: string;
-  values: number[];
-  dashed?: boolean;
+  total: number;
+  normal: number;
+  defective: number;
 };
 
 type ModelInspectionRow = {
@@ -801,41 +799,53 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-const INSPECTION_TREND_SERIES: Array<{
-  key: TrendSeriesKey;
-  label: string;
-  color: string;
-  dashed?: boolean;
-}> = [
-  { key: "total", label: "전체", color: "#0f172a" },
-  { key: "normal", label: "정상", color: "#059669" },
-  { key: "defective", label: "불량", color: "#e11d48" },
-];
+const CHART_TOTAL_COLOR = "#0f172a";
+const CHART_NORMAL_COLOR = "#059669";
+const CHART_DEFECT_COLOR = "#e11d48";
+const CHART_RATE_COLOR = "#f97316";
 
-const MODEL_TREND_COLORS = [
-  "#0f172a",
-  "#0284c7",
-  "#e11d48",
-  "#059669",
-  "#7c3aed",
-  "#d97706",
-];
+const CHART_SERIES_LABELS = [
+  { key: "total", label: "전체", color: CHART_TOTAL_COLOR },
+  { key: "normal", label: "정상", color: CHART_NORMAL_COLOR },
+  { key: "defective", label: "불량", color: CHART_DEFECT_COLOR },
+] as const;
 
-function SimpleLineChart({
-  labels,
-  series,
-  height = 260,
+function getChartLabelLines(label: string) {
+  const normalized = label.trim();
+
+  if (!normalized) return [""];
+
+  if (normalized.includes("~")) return [normalized];
+
+  if (normalized.startsWith("(분리형)")) {
+    return ["(분리형)", normalized.replace("(분리형)", "").trim() || "휴대용분유포트"];
+  }
+
+  if (normalized.length <= 9) return [normalized];
+
+  const spacedParts = normalized.split(/\s+/).filter(Boolean);
+
+  if (spacedParts.length >= 2) {
+    const first = spacedParts[0];
+    const second = spacedParts.slice(1).join(" ");
+    return [first, second.length > 12 ? `${second.slice(0, 11)}…` : second];
+  }
+
+  return [normalized.slice(0, 9), normalized.length > 18 ? `${normalized.slice(9, 17)}…` : normalized.slice(9)];
+}
+
+function ComboBarRateChart({
+  rows,
   emptyText,
+  height = 340,
 }: {
-  labels: string[];
-  series: TrendLineSeries[];
-  height?: number;
+  rows: ComboChartRow[];
   emptyText: string;
+  height?: number;
 }) {
-  const hasLabels = labels.length > 0;
-  const hasSeries = series.some((item) => item.values.some((value) => value > 0));
+  const visibleRows = rows.filter((row) => row.total > 0 || row.normal > 0 || row.defective > 0);
 
-  if (!hasLabels || !hasSeries) {
+  if (visibleRows.length === 0) {
     return (
       <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
         {emptyText}
@@ -843,38 +853,60 @@ function SimpleLineChart({
     );
   }
 
-  const width = 760;
-  const padding = { top: 54, right: 36, bottom: 46, left: 48 };
+  const width = 860;
+  const padding = { top: 58, right: 64, bottom: 72, left: 52 };
   const chartHeight = height;
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = chartHeight - padding.top - padding.bottom;
-  const maxValue = Math.max(
+  const maxCount = Math.max(
     1,
-    ...series.flatMap((item) => item.values.map((value) => Number(value) || 0))
+    ...visibleRows.flatMap((row) => [row.total, row.normal, row.defective])
   );
-  const yGuides = Array.from(
-    new Set([maxValue, Math.ceil(maxValue / 2), 0])
-  ).sort((a, b) => b - a);
-  const xStep = labels.length <= 1 ? 0 : innerWidth / (labels.length - 1);
-  const labelInterval = labels.length <= 8 ? 1 : Math.ceil(labels.length / 6);
+  const maxRateValue = Math.max(
+    0,
+    ...visibleRows.map((row) => calculatePercent(row.defective, row.total))
+  );
+  const maxRate = Math.max(10, Math.min(100, Math.ceil(maxRateValue / 10) * 10));
+  const yGuides = Array.from(new Set([maxCount, Math.ceil(maxCount / 2), 0])).sort(
+    (a, b) => b - a
+  );
+  const rateGuides = Array.from(new Set([maxRate, Math.ceil(maxRate / 2), 0])).sort(
+    (a, b) => b - a
+  );
+  const groupWidth = innerWidth / visibleRows.length;
+  const barGap = visibleRows.length >= 8 ? 3 : 5;
+  const barWidth = Math.max(
+    8,
+    Math.min(22, (Math.min(groupWidth * 0.68, 72) - barGap * 2) / 3)
+  );
+  const minBarHeight = 4;
 
-  const getX = (index: number) =>
-    labels.length <= 1 ? padding.left + innerWidth / 2 : padding.left + index * xStep;
-  const getY = (value: number) =>
-    padding.top + innerHeight - (Math.max(0, value) / maxValue) * innerHeight;
+  const getX = (index: number) => padding.left + groupWidth * index + groupWidth / 2;
+  const getCountY = (value: number) =>
+    padding.top + innerHeight - (Math.max(0, value) / maxCount) * innerHeight;
+  const getRateY = (value: number) =>
+    padding.top + innerHeight - (Math.max(0, value) / maxRate) * innerHeight;
+
+  const ratePoints = visibleRows
+    .map((row, index) => {
+      const rate = calculatePercent(row.defective, row.total);
+      return `${getX(index)},${getRateY(rate)}`;
+    })
+    .join(" ");
 
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white p-4">
-      <div className="mb-3 flex flex-wrap gap-2">
-        {series.map((item) => (
-          <div key={`legend-${item.id}`} className="flex items-center gap-1.5 rounded-full bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">
-            <span
-              className="h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: item.color }}
-            />
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {CHART_SERIES_LABELS.map((item) => (
+          <div key={`legend-${item.key}`} className="flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-600">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
             <span>{item.label}</span>
           </div>
         ))}
+        <div className="flex items-center gap-1.5 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-bold text-orange-700">
+          <span className="inline-block h-0.5 w-5 border-t-2 border-dotted border-orange-500" />
+          <span>불량률</span>
+        </div>
       </div>
 
       <svg
@@ -882,13 +914,13 @@ function SimpleLineChart({
         style={{ height: chartHeight }}
         viewBox={`0 0 ${width} ${chartHeight}`}
         role="img"
-        aria-label="입고 추이 그래프"
+        aria-label="입고 추이 막대 그래프"
       >
         {yGuides.map((guide) => {
-          const y = getY(guide);
+          const y = getCountY(guide);
 
           return (
-            <g key={`guide-${guide}`}>
+            <g key={`count-guide-${guide}`}>
               <line
                 x1={padding.left}
                 x2={width - padding.right}
@@ -901,7 +933,7 @@ function SimpleLineChart({
                 x={padding.left - 10}
                 y={y + 4}
                 textAnchor="end"
-                className="fill-slate-400 text-[11px] font-semibold"
+                className="fill-slate-400 text-[11px] font-bold"
               >
                 {guide}
               </text>
@@ -909,99 +941,131 @@ function SimpleLineChart({
           );
         })}
 
-        {labels.map((label, index) => {
-          const shouldShowLabel =
-            index === 0 || index === labels.length - 1 || index % labelInterval === 0;
-
-          if (!shouldShowLabel) return null;
+        {rateGuides.map((guide) => {
+          const y = getRateY(guide);
 
           return (
             <text
-              key={`x-label-${label}-${index}`}
-              x={getX(index)}
-              y={chartHeight - 14}
-              textAnchor="middle"
-              className="fill-slate-600 text-[11px] font-bold"
+              key={`rate-guide-${guide}`}
+              x={width - padding.right + 10}
+              y={y + 4}
+              textAnchor="start"
+              className="fill-orange-400 text-[11px] font-bold"
             >
-              {label}
+              {guide}%
             </text>
           );
         })}
 
-        {series.map((item, seriesIndex) => {
-          const points = labels
-            .map((_, index) => `${getX(index)},${getY(item.values[index] || 0)}`)
-            .join(" ");
+        {visibleRows.map((row, index) => {
+          const centerX = getX(index);
+          const totalX = centerX - barWidth - barGap;
+          const normalX = centerX;
+          const defectX = centerX + barWidth + barGap;
+          const bars = [
+            { key: "total", value: row.total, x: totalX, color: CHART_TOTAL_COLOR },
+            { key: "normal", value: row.normal, x: normalX, color: CHART_NORMAL_COLOR },
+            { key: "defective", value: row.defective, x: defectX, color: CHART_DEFECT_COLOR },
+          ];
+          const labelLines = getChartLabelLines(row.label);
 
           return (
-            <g key={`line-${item.id}`}>
-              <polyline
-                fill="none"
-                points={points}
-                stroke={item.color}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="3.5"
-                strokeDasharray={item.dashed ? "7 6" : undefined}
-              />
-              {labels.map((_, index) => {
-                const value = item.values[index] || 0;
+            <g key={`group-${row.id}-${index}`}>
+              {bars.map((bar) => {
+                const rawHeight = (bar.value / maxCount) * innerHeight;
+                const barHeight = bar.value > 0 ? Math.max(minBarHeight, rawHeight) : 0;
+                const y = padding.top + innerHeight - barHeight;
 
                 return (
-                  <circle
-                    key={`dot-${item.id}-${index}`}
-                    cx={getX(index)}
-                    cy={getY(value)}
-                    r="4.5"
-                    fill={item.color}
-                    stroke="white"
-                    strokeWidth="2.5"
-                  />
-                );
-              })}
-              {labels.map((_, index) => {
-                const value = item.values[index] || 0;
-                const shouldShowValue = value > 0 || series.length === 1;
-
-                if (!shouldShowValue) return null;
-
-                const labelText = String(value);
-                const labelWidth = Math.max(28, 18 + labelText.length * 8);
-                const seriesOffset = series.length > 1 ? (seriesIndex - (series.length - 1) / 2) * 13 : 0;
-                const rawLabelX = getX(index) + seriesOffset;
-                const labelX = Math.min(
-                  width - padding.right - labelWidth / 2,
-                  Math.max(padding.left + labelWidth / 2, rawLabelX)
-                );
-                const labelY = Math.max(
-                  16,
-                  getY(value) - 16 - (seriesIndex % 4) * 18
-                );
-
-                return (
-                  <g key={`value-${item.id}-${index}`}>
+                  <g key={`bar-${row.id}-${bar.key}`}>
                     <rect
-                      x={labelX - labelWidth / 2}
-                      y={labelY - 13}
-                      width={labelWidth}
-                      height="20"
-                      rx="10"
-                      fill="white"
-                      stroke={item.color}
-                      strokeWidth="1.5"
+                      x={bar.x - barWidth / 2}
+                      y={y}
+                      width={barWidth}
+                      height={barHeight}
+                      rx="5"
+                      fill={bar.color}
+                      opacity={bar.key === "total" ? 0.9 : 0.82}
                     />
-                    <text
-                      x={labelX}
-                      y={labelY + 2}
-                      textAnchor="middle"
-                      fill={item.color}
-                      className="text-[13px] font-black"
-                    >
-                      {labelText}
-                    </text>
+                    {bar.value > 0 && (
+                      <text
+                        x={bar.x}
+                        y={Math.max(14, y - 7)}
+                        textAnchor="middle"
+                        className="fill-slate-900 text-[12px] font-black"
+                      >
+                        {bar.value}
+                      </text>
+                    )}
                   </g>
                 );
               })}
+
+              <text
+                x={centerX}
+                y={chartHeight - 38}
+                textAnchor="middle"
+                className="fill-slate-600 text-[11px] font-bold"
+              >
+                {labelLines.map((line, lineIndex) => (
+                  <tspan key={`label-${row.id}-${lineIndex}`} x={centerX} dy={lineIndex === 0 ? 0 : 14}>
+                    {line}
+                  </tspan>
+                ))}
+              </text>
+              <title>{`${row.label} · 전체 ${row.total}건 · 정상 ${row.normal}건 · 불량 ${row.defective}건`}</title>
+            </g>
+          );
+        })}
+
+        <polyline
+          fill="none"
+          points={ratePoints}
+          stroke={CHART_RATE_COLOR}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="3"
+          strokeDasharray="4 6"
+        />
+
+        {visibleRows.map((row, index) => {
+          const rate = calculatePercent(row.defective, row.total);
+          if (row.total <= 0) return null;
+
+          const centerX = getX(index);
+          const y = getRateY(rate);
+          const labelText = `${rate}%`;
+          const labelWidth = Math.max(34, 18 + labelText.length * 7);
+          const labelY = Math.min(padding.top + innerHeight - 18, Math.max(22, y - 16));
+
+          return (
+            <g key={`rate-${row.id}-${index}`}>
+              <circle
+                cx={centerX}
+                cy={y}
+                r="4"
+                fill={CHART_RATE_COLOR}
+                stroke="white"
+                strokeWidth="2.5"
+              />
+              <rect
+                x={centerX - labelWidth / 2}
+                y={labelY - 13}
+                width={labelWidth}
+                height="21"
+                rx="10.5"
+                fill="white"
+                stroke={CHART_RATE_COLOR}
+                strokeWidth="1.4"
+              />
+              <text
+                x={centerX}
+                y={labelY + 2}
+                textAnchor="middle"
+                className="fill-orange-600 text-[12px] font-black"
+              >
+                {labelText}
+              </text>
             </g>
           );
         })}
@@ -1009,6 +1073,7 @@ function SimpleLineChart({
     </div>
   );
 }
+
 function DailyInspectionTrendChart({
   rows,
   startKey,
@@ -1020,32 +1085,21 @@ function DailyInspectionTrendChart({
 }) {
   const dateKeys = getDateKeyRange(startKey, endKey);
   const valueMap = new Map(rows.map((row) => [row.dateKey, row]));
-  const visibleRows = dateKeys.map((dateKey) => {
+  const visibleRows: ComboChartRow[] = dateKeys.map((dateKey) => {
     const value = valueMap.get(dateKey);
 
-    return (
-      value || {
-        dateKey,
-        label: formatTrendDateLabel(dateKey),
-        total: 0,
-        normal: 0,
-        defective: 0,
-      }
-    );
+    return {
+      id: dateKey,
+      label: formatTrendDateLabel(dateKey),
+      total: value?.total || 0,
+      normal: value?.normal || 0,
+      defective: value?.defective || 0,
+    };
   });
-  const labels = visibleRows.map((row) => row.label);
-  const series: TrendLineSeries[] = INSPECTION_TREND_SERIES.map((item) => ({
-    id: item.key,
-    label: item.label,
-    color: item.color,
-    dashed: item.dashed,
-    values: visibleRows.map((row) => row[item.key]),
-  }));
 
   return (
-    <SimpleLineChart
-      labels={labels}
-      series={series}
+    <ComboBarRateChart
+      rows={visibleRows}
       emptyText="선택 기간에 일별 입고 추이 데이터가 없습니다."
     />
   );
@@ -1058,105 +1112,45 @@ function WeeklyInspectionTrendChart({
   rows: WeeklyTrendPoint[];
   maxWeeks?: number;
 }) {
-  const visibleRows = rows.slice(-maxWeeks);
-  const labels = visibleRows.map((row) => row.label);
-  const series: TrendLineSeries[] = INSPECTION_TREND_SERIES.map((item) => ({
-    id: item.key,
-    label: item.label,
-    color: item.color,
-    dashed: item.dashed,
-    values: visibleRows.map((row) => row[item.key]),
+  const visibleRows: ComboChartRow[] = rows.slice(-maxWeeks).map((row) => ({
+    id: row.weekKey,
+    label: row.label,
+    total: row.total,
+    normal: row.normal,
+    defective: row.defective,
   }));
 
   return (
-    <SimpleLineChart
-      labels={labels}
-      series={series}
+    <ComboBarRateChart
+      rows={visibleRows}
       emptyText="선택 기간에 주간 입고 추이 데이터가 없습니다."
     />
   );
 }
 
-function ModelDailyComparisonChart({
-  modelRows,
-  startKey,
-  endKey,
-  maxModels = 3,
-}: {
-  modelRows: ModelInspectionRow[];
-  startKey: string;
-  endKey: string;
-  maxModels?: number;
-}) {
-  const targetRows = modelRows
-    .filter((row) => row.trendRows.length > 0)
-    .slice(0, maxModels);
-  const dateKeys = getDateKeyRange(startKey, endKey);
-  const labels = dateKeys.map(formatTrendDateLabel);
-  const series: TrendLineSeries[] = targetRows.map((row, index) => {
-    const valueMap = new Map(
-      row.trendRows.map((point) => [point.dateKey, point.total])
-    );
-
-    return {
-      id: row.productName,
-      label: row.productName,
-      color: MODEL_TREND_COLORS[index % MODEL_TREND_COLORS.length],
-      values: dateKeys.map((dateKey) => valueMap.get(dateKey) || 0),
-    };
-  });
-
-  return (
-    <SimpleLineChart
-      labels={labels}
-      series={series}
-      emptyText="선택 기간에 모델별 일별 입고 추이 데이터가 없습니다."
-    />
-  );
-}
-
-function ModelWeeklyComparisonChart({
+function ModelInspectionComparisonChart({
   modelRows,
   maxModels = 5,
-  maxWeeks = 8,
 }: {
   modelRows: ModelInspectionRow[];
   maxModels?: number;
-  maxWeeks?: number;
 }) {
-  const targetRows = modelRows
-    .filter((row) => row.weeklyTrendRows.length > 0)
-    .slice(0, maxModels);
-
-  const weekLabelMap = new Map<string, string>();
-  targetRows.forEach((row) => {
-    row.weeklyTrendRows.forEach((point) => {
-      weekLabelMap.set(point.weekKey, point.label);
-    });
-  });
-
-  const weekKeys = Array.from(weekLabelMap.keys())
-    .sort(compareWeeklyTrendKey)
-    .slice(-maxWeeks);
-  const labels = weekKeys.map((weekKey) => weekLabelMap.get(weekKey) || weekKey);
-  const series: TrendLineSeries[] = targetRows.map((row, index) => {
-    const valueMap = new Map(
-      row.weeklyTrendRows.map((point) => [point.weekKey, point.total])
-    );
-
-    return {
+  const visibleRows: ComboChartRow[] = modelRows
+    .filter((row) => row.total > 0)
+    .slice(0, maxModels)
+    .map((row) => ({
       id: row.productName,
       label: row.productName,
-      color: MODEL_TREND_COLORS[index % MODEL_TREND_COLORS.length],
-      values: weekKeys.map((weekKey) => valueMap.get(weekKey) || 0),
-    };
-  });
+      total: row.total,
+      normal: row.normal,
+      defective: row.defective,
+    }));
 
   return (
-    <SimpleLineChart
-      labels={labels}
-      series={series}
-      emptyText="선택 기간에 모델별 주간 입고 추이 데이터가 없습니다."
+    <ComboBarRateChart
+      rows={visibleRows}
+      height={360}
+      emptyText="선택 기간에 모델별 입고 데이터가 없습니다."
     />
   );
 }
@@ -3121,10 +3115,10 @@ export default function ReturnRecordApp() {
                   </CardTitle>
                   <p className="text-sm text-slate-500">
                     {reportRange === "week"
-                      ? "이번주는 일별 흐름을 숫자 라벨과 함께 확인합니다."
+                      ? "이번주는 일별 막대와 불량률 점선으로 확인합니다."
                       : reportRange === "month"
-                        ? "이번달은 일별 흐름을 숫자 라벨과 함께 확인합니다."
-                        : "전체 누적 데이터는 주별 입고 흐름을 숫자 라벨과 함께 확인합니다."}
+                        ? "이번달은 주별 막대와 불량률 점선으로 확인합니다."
+                        : "전체 누적 데이터는 주별 막대와 불량률 점선으로 확인합니다."}
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -3133,25 +3127,25 @@ export default function ReturnRecordApp() {
                       <div>
                         <p className="text-sm font-bold text-slate-700">전체 입고 추이</p>
                         <p className="text-xs text-slate-500">
-                          {reportRange === "all"
-                            ? "전체 · 정상 · 불량을 주별 그래프로 봅니다."
-                            : "전체 · 정상 · 불량을 일별 그래프로 봅니다."}
+                          {reportRange === "week"
+                            ? "전체 · 정상 · 불량을 일별 막대로 보고, 불량률은 점선으로 봅니다."
+                            : "전체 · 정상 · 불량을 주별 막대로 보고, 불량률은 점선으로 봅니다."}
                         </p>
                       </div>
                       <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                        {reportRange === "all" ? "주별 그래프" : "일별 그래프"}
+                        {reportRange === "week" ? "일별 막대" : "주별 막대"}
                       </span>
                     </div>
-                    {reportRange === "all" ? (
-                      <WeeklyInspectionTrendChart
-                        rows={selectedReportSummary.overallWeeklyTrendRows}
-                        maxWeeks={8}
-                      />
-                    ) : (
+                    {reportRange === "week" ? (
                       <DailyInspectionTrendChart
                         rows={selectedReportSummary.overallTrendRows}
-                        startKey={reportRange === "month" ? reportDateKeys.monthStartKey : reportDateKeys.weekStartKey}
-                        endKey={reportRange === "month" ? reportDateKeys.todayKey : reportDateKeys.weekEndKey}
+                        startKey={reportDateKeys.weekStartKey}
+                        endKey={reportDateKeys.weekEndKey}
+                      />
+                    ) : (
+                      <WeeklyInspectionTrendChart
+                        rows={selectedReportSummary.overallWeeklyTrendRows}
+                        maxWeeks={reportRange === "month" ? 6 : 8}
                       />
                     )}
                   </div>
@@ -3162,30 +3156,18 @@ export default function ReturnRecordApp() {
                         <p className="text-sm font-bold text-slate-700">모델별 입고 추이</p>
                         <p className="text-xs text-slate-500">
                           {reportRange === "week"
-                            ? "입고량 상위 3개 모델을 일별 그래프로 비교합니다."
-                            : reportRange === "month"
-                              ? "입고량 상위 5개 모델을 일별 그래프로 비교합니다."
-                              : "입고량 상위 5개 모델을 주별 그래프로 비교합니다."}
+                            ? "입고량 상위 3개 모델의 전체 · 정상 · 불량 건수를 비교합니다."
+                            : "입고량 상위 5개 모델의 전체 · 정상 · 불량 건수를 비교합니다."}
                         </p>
                       </div>
                       <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
                         {reportRange === "week" ? "상위 3개 모델" : "상위 5개 모델"}
                       </span>
                     </div>
-                    {reportRange === "all" ? (
-                      <ModelWeeklyComparisonChart
-                        modelRows={selectedReportSummary.modelInspectionRows}
-                        maxModels={5}
-                        maxWeeks={8}
-                      />
-                    ) : (
-                      <ModelDailyComparisonChart
-                        modelRows={selectedReportSummary.modelInspectionRows}
-                        startKey={reportRange === "month" ? reportDateKeys.monthStartKey : reportDateKeys.weekStartKey}
-                        endKey={reportRange === "month" ? reportDateKeys.todayKey : reportDateKeys.weekEndKey}
-                        maxModels={reportRange === "week" ? 3 : 5}
-                      />
-                    )}
+                    <ModelInspectionComparisonChart
+                      modelRows={selectedReportSummary.modelInspectionRows}
+                      maxModels={reportRange === "week" ? 3 : 5}
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -3316,32 +3298,20 @@ export default function ReturnRecordApp() {
                     </CardTitle>
                     <p className="text-sm text-slate-500">
                       {reportRange === "week"
-                        ? "이번주는 등록일자 기준 일별 입고 흐름을 상위 3개 모델로 확인합니다."
-                        : reportRange === "month"
-                          ? "이번달은 등록일자 기준 일별 입고 흐름을 상위 5개 모델로 확인합니다."
-                          : "전체 누적 데이터는 등록일자 기준 주별 입고 흐름을 상위 5개 모델로 확인합니다."}
+                        ? "이번주는 입고량 상위 3개 모델의 전체 · 정상 · 불량 건수를 비교합니다."
+                        : "선택 기간 입고량 상위 5개 모델의 전체 · 정상 · 불량 건수를 비교합니다."}
                     </p>
                   </CardHeader>
                   <CardContent>
                     <div className="mb-3 flex justify-end">
                       <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                        {reportRange === "all" ? "상위 5개 모델 · 주별" : reportRange === "week" ? "상위 3개 모델 · 일별" : "상위 5개 모델 · 일별"}
+                        {reportRange === "week" ? "상위 3개 모델" : "상위 5개 모델"}
                       </span>
                     </div>
-                    {reportRange === "all" ? (
-                      <ModelWeeklyComparisonChart
-                        modelRows={selectedReportSummary.modelInspectionRows}
-                        maxModels={5}
-                        maxWeeks={8}
-                      />
-                    ) : (
-                      <ModelDailyComparisonChart
-                        modelRows={selectedReportSummary.modelInspectionRows}
-                        startKey={reportRange === "month" ? reportDateKeys.monthStartKey : reportDateKeys.weekStartKey}
-                        endKey={reportRange === "month" ? reportDateKeys.todayKey : reportDateKeys.weekEndKey}
-                        maxModels={reportRange === "week" ? 3 : 5}
-                      />
-                    )}
+                    <ModelInspectionComparisonChart
+                      modelRows={selectedReportSummary.modelInspectionRows}
+                      maxModels={reportRange === "week" ? 3 : 5}
+                    />
                   </CardContent>
                 </Card>
               )}

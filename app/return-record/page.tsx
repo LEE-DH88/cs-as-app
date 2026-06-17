@@ -687,6 +687,23 @@ function addDaysToDateKey(dateKey: string, days: number) {
   return dateToDateKey(date);
 }
 
+function getDateKeyRange(startKey: string, endKey: string) {
+  const startDate = parseDateKeyToDate(startKey);
+  const endDate = parseDateKeyToDate(endKey);
+
+  if (!startDate || !endDate || startDate > endDate) return [];
+
+  const rows: string[] = [];
+  const current = new Date(startDate);
+
+  while (current <= endDate) {
+    rows.push(dateToDateKey(current));
+    current.setDate(current.getDate() + 1);
+  }
+
+  return rows;
+}
+
 function getWeekStartKey(dateKey: string) {
   const date = parseDateKeyToDate(dateKey);
 
@@ -853,7 +870,7 @@ function SimpleLineChart({
         style={{ height: chartHeight }}
         viewBox={`0 0 ${width} ${chartHeight}`}
         role="img"
-        aria-label="주간 입고 추이 그래프"
+        aria-label="입고 추이 그래프"
       >
         {yGuides.map((guide) => {
           const y = getY(guide);
@@ -899,7 +916,7 @@ function SimpleLineChart({
           );
         })}
 
-        {series.map((item) => {
+        {series.map((item, seriesIndex) => {
           const points = labels
             .map((_, index) => `${getX(index)},${getY(item.values[index] || 0)}`)
             .join(" ");
@@ -915,22 +932,86 @@ function SimpleLineChart({
                 strokeWidth="3"
                 strokeDasharray={item.dashed ? "7 6" : undefined}
               />
-              {labels.map((_, index) => (
-                <circle
-                  key={`dot-${item.id}-${index}`}
-                  cx={getX(index)}
-                  cy={getY(item.values[index] || 0)}
-                  r="4"
-                  fill={item.color}
-                  stroke="white"
-                  strokeWidth="2"
-                />
-              ))}
+              {labels.map((_, index) => {
+                const value = item.values[index] || 0;
+
+                return (
+                  <circle
+                    key={`dot-${item.id}-${index}`}
+                    cx={getX(index)}
+                    cy={getY(value)}
+                    r="4"
+                    fill={item.color}
+                    stroke="white"
+                    strokeWidth="2"
+                  />
+                );
+              })}
+              {labels.map((_, index) => {
+                const value = item.values[index] || 0;
+                const shouldShowValue = value > 0 || series.length === 1;
+
+                if (!shouldShowValue) return null;
+
+                return (
+                  <text
+                    key={`value-${item.id}-${index}`}
+                    x={getX(index)}
+                    y={Math.max(10, getY(value) - 8 - (seriesIndex % 4) * 12)}
+                    textAnchor="middle"
+                    className="fill-slate-700 text-[11px] font-bold"
+                  >
+                    {value}
+                  </text>
+                );
+              })}
             </g>
           );
         })}
       </svg>
     </div>
+  );
+}
+
+function DailyInspectionTrendChart({
+  rows,
+  startKey,
+  endKey,
+}: {
+  rows: TrendPoint[];
+  startKey: string;
+  endKey: string;
+}) {
+  const dateKeys = getDateKeyRange(startKey, endKey);
+  const valueMap = new Map(rows.map((row) => [row.dateKey, row]));
+  const visibleRows = dateKeys.map((dateKey) => {
+    const value = valueMap.get(dateKey);
+
+    return (
+      value || {
+        dateKey,
+        label: formatTrendDateLabel(dateKey),
+        total: 0,
+        normal: 0,
+        defective: 0,
+      }
+    );
+  });
+  const labels = visibleRows.map((row) => row.label);
+  const series: TrendLineSeries[] = INSPECTION_TREND_SERIES.map((item) => ({
+    id: item.key,
+    label: item.label,
+    color: item.color,
+    dashed: item.dashed,
+    values: visibleRows.map((row) => row[item.key]),
+  }));
+
+  return (
+    <SimpleLineChart
+      labels={labels}
+      series={series}
+      emptyText="선택 기간에 일별 입고 추이 데이터가 없습니다."
+    />
   );
 }
 
@@ -956,6 +1037,44 @@ function WeeklyInspectionTrendChart({
       labels={labels}
       series={series}
       emptyText="선택 기간에 주간 입고 추이 데이터가 없습니다."
+    />
+  );
+}
+
+function ModelDailyComparisonChart({
+  modelRows,
+  startKey,
+  endKey,
+  maxModels = 3,
+}: {
+  modelRows: ModelInspectionRow[];
+  startKey: string;
+  endKey: string;
+  maxModels?: number;
+}) {
+  const targetRows = modelRows
+    .filter((row) => row.trendRows.length > 0)
+    .slice(0, maxModels);
+  const dateKeys = getDateKeyRange(startKey, endKey);
+  const labels = dateKeys.map(formatTrendDateLabel);
+  const series: TrendLineSeries[] = targetRows.map((row, index) => {
+    const valueMap = new Map(
+      row.trendRows.map((point) => [point.dateKey, point.total])
+    );
+
+    return {
+      id: row.productName,
+      label: row.productName,
+      color: MODEL_TREND_COLORS[index % MODEL_TREND_COLORS.length],
+      values: dateKeys.map((dateKey) => valueMap.get(dateKey) || 0),
+    };
+  });
+
+  return (
+    <SimpleLineChart
+      labels={labels}
+      series={series}
+      emptyText="선택 기간에 모델별 일별 입고 추이 데이터가 없습니다."
     />
   );
 }
@@ -2966,51 +3085,80 @@ export default function ReturnRecordApp() {
               </CardContent>
             </Card>
 
-            <Card className="rounded-[2rem] shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <Clock3 className="h-5 w-5 text-slate-500" />
-                  입고 추이
-                </CardTitle>
-                <p className="text-sm text-slate-500">
-                  전체 입고 흐름과 모델별 최근 입고 흐름을 함께 확인합니다.
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-3">
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <p className="text-sm font-bold text-slate-700">전체 입고 추이</p>
-                      <p className="text-xs text-slate-500">전체 · 정상 · 불량을 1주 단위 선 그래프로 봅니다.</p>
+            {reportRange !== "today" && (
+              <Card className="rounded-[2rem] shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <Clock3 className="h-5 w-5 text-slate-500" />
+                    입고 추이
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">
+                    {reportRange === "week"
+                      ? "이번주는 일별 흐름으로, 전체는 주별 흐름으로 확인합니다."
+                      : "전체 누적 데이터의 주별 입고 흐름을 확인합니다."}
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-3">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-slate-700">전체 입고 추이</p>
+                        <p className="text-xs text-slate-500">
+                          {reportRange === "week"
+                            ? "전체 · 정상 · 불량을 일별 그래프로 봅니다."
+                            : "전체 · 정상 · 불량을 주별 그래프로 봅니다."}
+                        </p>
+                      </div>
+                      <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                        {reportRange === "week" ? "일별 그래프" : "주별 그래프"}
+                      </span>
                     </div>
-                    <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                      주간 그래프
-                    </span>
+                    {reportRange === "week" ? (
+                      <DailyInspectionTrendChart
+                        rows={selectedReportSummary.overallTrendRows}
+                        startKey={reportDateKeys.weekStartKey}
+                        endKey={reportDateKeys.weekEndKey}
+                      />
+                    ) : (
+                      <WeeklyInspectionTrendChart
+                        rows={selectedReportSummary.overallWeeklyTrendRows}
+                        maxWeeks={8}
+                      />
+                    )}
                   </div>
-                  <WeeklyInspectionTrendChart
-                    rows={selectedReportSummary.overallWeeklyTrendRows}
-                    maxWeeks={8}
-                  />
-                </div>
 
-                <div className="space-y-3 border-t pt-5">
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <p className="text-sm font-bold text-slate-700">모델별 입고 추이</p>
-                      <p className="text-xs text-slate-500">입고량 상위 모델을 1주 단위로 비교합니다.</p>
+                  <div className="space-y-3 border-t pt-5">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-slate-700">모델별 입고 추이</p>
+                        <p className="text-xs text-slate-500">
+                          {reportRange === "week"
+                            ? "입고량 상위 3개 모델을 일별 그래프로 비교합니다."
+                            : "입고량 상위 5개 모델을 주별 그래프로 비교합니다."}
+                        </p>
+                      </div>
+                      <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                        {reportRange === "week" ? "상위 3개 모델" : "상위 5개 모델"}
+                      </span>
                     </div>
-                    <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                      상위 5개 모델
-                    </span>
+                    {reportRange === "week" ? (
+                      <ModelDailyComparisonChart
+                        modelRows={selectedReportSummary.modelInspectionRows}
+                        startKey={reportDateKeys.weekStartKey}
+                        endKey={reportDateKeys.weekEndKey}
+                        maxModels={3}
+                      />
+                    ) : (
+                      <ModelWeeklyComparisonChart
+                        modelRows={selectedReportSummary.modelInspectionRows}
+                        maxModels={5}
+                        maxWeeks={8}
+                      />
+                    )}
                   </div>
-                  <ModelWeeklyComparisonChart
-                    modelRows={selectedReportSummary.modelInspectionRows}
-                    maxModels={5}
-                    maxWeeks={8}
-                  />
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
         </div>
@@ -3128,43 +3276,42 @@ export default function ReturnRecordApp() {
                 </CardContent>
               </Card>
 
-              <Card className="rounded-[2rem] shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-xl">
-                    <Clock3 className="h-5 w-5 text-slate-500" />
-                    모델별 입고 추이
-                  </CardTitle>
-                  <p className="text-sm text-slate-500">
-등록일자 기준으로 모델별 입고 흐름을 1주 단위 그래프로 확인합니다.
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  {selectedReportSummary.modelInspectionRows.length === 0 ? (
-                    <div className="rounded-3xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
-                      선택 기간에 모델별 입고 추이 데이터가 없습니다.
+              {reportRange !== "today" && (
+                <Card className="rounded-[2rem] shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-xl">
+                      <Clock3 className="h-5 w-5 text-slate-500" />
+                      모델별 입고 추이
+                    </CardTitle>
+                    <p className="text-sm text-slate-500">
+                      {reportRange === "week"
+                        ? "이번주는 등록일자 기준 일별 입고 흐름을 상위 3개 모델로 확인합니다."
+                        : "전체 누적 데이터는 등록일자 기준 주별 입고 흐름을 상위 5개 모델로 확인합니다."}
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="mb-3 flex justify-end">
+                      <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                        {reportRange === "week" ? "상위 3개 모델 · 일별" : "상위 5개 모델 · 주별"}
+                      </span>
                     </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {selectedReportSummary.modelInspectionRows.map((row) => (
-                        <div
-                          key={`model-report-trend-${row.productName}`}
-                          className="rounded-3xl border border-slate-200 bg-slate-50 p-5"
-                        >
-                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                            <p className="font-bold text-slate-900">{row.productName}</p>
-                            <p className="text-sm text-slate-500">
-                              총 {row.total}건 · 정상 {row.normal}건 · 불량 {row.defective}건
-                            </p>
-                          </div>
-                          <div className="mt-4">
-                            <WeeklyInspectionTrendChart rows={row.weeklyTrendRows} maxWeeks={8} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                    {reportRange === "week" ? (
+                      <ModelDailyComparisonChart
+                        modelRows={selectedReportSummary.modelInspectionRows}
+                        startKey={reportDateKeys.weekStartKey}
+                        endKey={reportDateKeys.weekEndKey}
+                        maxModels={3}
+                      />
+                    ) : (
+                      <ModelWeeklyComparisonChart
+                        modelRows={selectedReportSummary.modelInspectionRows}
+                        maxModels={5}
+                        maxWeeks={8}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
               <Card className="rounded-[2rem] shadow-sm">
             <CardHeader>

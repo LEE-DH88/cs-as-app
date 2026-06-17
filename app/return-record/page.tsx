@@ -139,6 +139,27 @@ type ModelDefectRow = {
   reasons: DefectReasonRow[];
 };
 
+type TrendPoint = {
+  dateKey: string;
+  label: string;
+  total: number;
+  normal: number;
+  defective: number;
+};
+
+type ModelInspectionRow = {
+  productName: string;
+  total: number;
+  normal: number;
+  defective: number;
+  followUp: number;
+  pending: number;
+  normalRate: number;
+  defectRate: number;
+  reasons: DefectReasonRow[];
+  trendRows: TrendPoint[];
+};
+
 const RETURN_TYPES: ReturnType[] = [
   "일반반품",
   "변심반품",
@@ -318,9 +339,75 @@ function buildReportSummary(
   ];
 
   const reasonMap = new Map<string, number>();
-  const modelMap = new Map<string, { count: number; reasons: Map<string, number> }>();
+  const overallTrendMap = new Map<
+    string,
+    { total: number; normal: number; defective: number }
+  >();
+  const modelMap = new Map<
+    string,
+    {
+      total: number;
+      normal: number;
+      defective: number;
+      followUp: number;
+      pending: number;
+      reasons: Map<string, number>;
+      trendMap: Map<string, { total: number; normal: number; defective: number }>;
+    }
+  >();
 
-  defectiveRecords.forEach((record) => {
+  const ensureTrend = (
+    trendMap: Map<string, { total: number; normal: number; defective: number }>,
+    dateKey: string
+  ) => {
+    const current = trendMap.get(dateKey) || {
+      total: 0,
+      normal: 0,
+      defective: 0,
+    };
+    trendMap.set(dateKey, current);
+    return current;
+  };
+
+  const ensureModel = (productName: string) => {
+    const current = modelMap.get(productName) || {
+      total: 0,
+      normal: 0,
+      defective: 0,
+      followUp: 0,
+      pending: 0,
+      reasons: new Map<string, number>(),
+      trendMap: new Map<string, { total: number; normal: number; defective: number }>(),
+    };
+    modelMap.set(productName, current);
+    return current;
+  };
+
+  records.forEach((record) => {
+    const productName = normalizeReportProductName(record.productName);
+    const dateKey = getDateOnly(record.createdAt) || "날짜 미입력";
+    const currentModel = ensureModel(productName);
+    const isNormal = isNormalInspectionResult(record.inspectionResult);
+    const isDefective = isDefectiveInspectionResult(record.inspectionResult);
+
+    currentModel.total += 1;
+    if (isNormal) currentModel.normal += 1;
+    if (isDefective) currentModel.defective += 1;
+    if (record.inspectionResult === "후속 확인 필요") currentModel.followUp += 1;
+    if (record.inspectionResult === "검사 대기") currentModel.pending += 1;
+
+    const overallTrend = ensureTrend(overallTrendMap, dateKey);
+    overallTrend.total += 1;
+    if (isNormal) overallTrend.normal += 1;
+    if (isDefective) overallTrend.defective += 1;
+
+    const modelTrend = ensureTrend(currentModel.trendMap, dateKey);
+    modelTrend.total += 1;
+    if (isNormal) modelTrend.normal += 1;
+    if (isDefective) modelTrend.defective += 1;
+
+    if (!isDefective) return;
+
     const noteText = record.note || "";
     const matchedReasons = defectiveNoteOptions.filter((reason) =>
       noteText.includes(reason)
@@ -329,23 +416,11 @@ function buildReportSummary(
 
     reasons.forEach((reason) => {
       reasonMap.set(reason, (reasonMap.get(reason) || 0) + 1);
-    });
-
-    const productName = normalizeReportProductName(record.productName);
-    const currentModel = modelMap.get(productName) || {
-      count: 0,
-      reasons: new Map<string, number>(),
-    };
-
-    currentModel.count += 1;
-    reasons.forEach((reason) => {
       currentModel.reasons.set(
         reason,
         (currentModel.reasons.get(reason) || 0) + 1
       );
     });
-
-    modelMap.set(productName, currentModel);
   });
 
   const defectReasonRows: DefectReasonRow[] = Array.from(reasonMap.entries())
@@ -356,19 +431,40 @@ function buildReportSummary(
     }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ko-KR"));
 
-  const modelDefectRows: ModelDefectRow[] = Array.from(modelMap.entries())
+  const modelInspectionRows: ModelInspectionRow[] = Array.from(modelMap.entries())
     .map(([productName, value]) => ({
       productName,
-      count: value.count,
+      total: value.total,
+      normal: value.normal,
+      defective: value.defective,
+      followUp: value.followUp,
+      pending: value.pending,
+      normalRate: calculatePercent(value.normal, value.total),
+      defectRate: calculatePercent(value.defective, value.total),
       reasons: Array.from(value.reasons.entries())
         .map(([label, count]) => ({
           label,
           count,
-          percent: calculatePercent(count, value.count || count),
+          percent: calculatePercent(count, value.defective || count),
         }))
         .sort(
           (a, b) => b.count - a.count || a.label.localeCompare(b.label, "ko-KR")
         ),
+      trendRows: trendMapToRows(value.trendMap),
+    }))
+    .sort(
+      (a, b) =>
+        b.total - a.total ||
+        b.defective - a.defective ||
+        a.productName.localeCompare(b.productName, "ko-KR")
+    );
+
+  const modelDefectRows: ModelDefectRow[] = modelInspectionRows
+    .filter((row) => row.defective > 0)
+    .map((row) => ({
+      productName: row.productName,
+      count: row.defective,
+      reasons: row.reasons,
     }))
     .sort(
       (a, b) =>
@@ -386,9 +482,10 @@ function buildReportSummary(
     resultRows,
     defectReasonRows,
     modelDefectRows,
+    modelInspectionRows,
+    overallTrendRows: trendMapToRows(overallTrendMap),
   };
 }
-
 function getProcessActionsByInspectionResult(value: InspectionResult): ProcessAction[] {
   if (isNormalInspectionResult(value)) {
     return ["안성물류이동"];
@@ -519,6 +616,35 @@ function formatDateKeyKo(dateKey: string) {
   if (!match) return dateKey;
 
   return `${match[1]}.${match[2]}.${match[3]}`;
+}
+
+function formatTrendDateLabel(dateKey: string) {
+  const match = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) return dateKey;
+
+  return `${Number(match[2])}/${Number(match[3])}`;
+}
+
+function compareTrendDateKey(a: string, b: string) {
+  if (a === b) return 0;
+  if (a === "날짜 미입력") return 1;
+  if (b === "날짜 미입력") return -1;
+  return a.localeCompare(b);
+}
+
+function trendMapToRows(
+  trendMap: Map<string, { total: number; normal: number; defective: number }>
+): TrendPoint[] {
+  return Array.from(trendMap.entries())
+    .map(([dateKey, value]) => ({
+      dateKey,
+      label: formatTrendDateLabel(dateKey),
+      total: value.total,
+      normal: value.normal,
+      defective: value.defective,
+    }))
+    .sort((a, b) => compareTrendDateKey(a.dateKey, b.dateKey));
 }
 
 function getReportPeriodLabel(range: ReportRange, keys: ReportDateKeys) {
@@ -2443,6 +2569,139 @@ export default function ReturnRecordApp() {
             </Card>
           </div>
 
+          <div className="grid gap-5 xl:grid-cols-2">
+            <Card className="rounded-[2rem] shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl">
+                  <Smartphone className="h-5 w-5 text-slate-500" />
+                  모델별 정상 / 불량 건수
+                </CardTitle>
+                <p className="text-sm text-slate-500">
+                  선택 기간의 입고 기록을 제품별 정상확인과 불량판정으로 나눕니다.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {selectedReportSummary.modelInspectionRows.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+                    선택 기간에 집계할 모델별 기록이 없습니다.
+                  </div>
+                ) : (
+                  selectedReportSummary.modelInspectionRows.slice(0, 8).map((row) => (
+                    <div key={`dashboard-model-count-${row.productName}`} className="space-y-2">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="min-w-0 truncate font-semibold text-slate-700">
+                          {row.productName}
+                        </span>
+                        <span className="shrink-0 text-slate-500">
+                          전체 {row.total}건
+                        </span>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div>
+                          <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                            <span>정상</span>
+                            <span>{row.normal}건 · {row.normalRate}%</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-emerald-500 transition-all"
+                              style={{ width: `${Math.max(row.normalRate, row.normal > 0 ? 4 : 0)}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                            <span>불량</span>
+                            <span>{row.defective}건 · {row.defectRate}%</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-rose-500 transition-all"
+                              style={{ width: `${Math.max(row.defectRate, row.defective > 0 ? 4 : 0)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[2rem] shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl">
+                  <Clock3 className="h-5 w-5 text-slate-500" />
+                  입고 추이
+                </CardTitle>
+                <p className="text-sm text-slate-500">
+                  전체 입고 흐름과 모델별 최근 입고 흐름을 함께 확인합니다.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="space-y-3">
+                  <p className="text-sm font-bold text-slate-700">전체 입고 추이</p>
+                  {selectedReportSummary.overallTrendRows.length === 0 ? (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
+                      선택 기간에 입고 추이 데이터가 없습니다.
+                    </div>
+                  ) : (
+                    selectedReportSummary.overallTrendRows.slice(-8).map((point) => {
+                      const trendPercent = calculatePercent(point.total, selectedReportSummary.total || point.total);
+
+                      return (
+                        <div key={`dashboard-overall-trend-${point.dateKey}`} className="space-y-1">
+                          <div className="flex items-center justify-between text-xs text-slate-500">
+                            <span className="font-semibold text-slate-700">{point.label}</span>
+                            <span>
+                              전체 {point.total}건 · 정상 {point.normal}건 · 불량 {point.defective}건
+                            </span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-slate-800 transition-all"
+                              style={{ width: `${Math.max(trendPercent, point.total > 0 ? 4 : 0)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="space-y-3 border-t pt-4">
+                  <p className="text-sm font-bold text-slate-700">모델별 입고 추이</p>
+                  {selectedReportSummary.modelInspectionRows.length === 0 ? (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
+                      선택 기간에 모델별 추이 데이터가 없습니다.
+                    </div>
+                  ) : (
+                    selectedReportSummary.modelInspectionRows.slice(0, 6).map((row) => (
+                      <div key={`dashboard-model-trend-${row.productName}`} className="rounded-3xl border border-slate-100 bg-slate-50 p-3">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="min-w-0 truncate font-semibold text-slate-800">
+                            {row.productName}
+                          </span>
+                          <span className="shrink-0 text-xs text-slate-500">총 {row.total}건</span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {row.trendRows.slice(-6).map((point) => (
+                            <span
+                              key={`dashboard-model-trend-${row.productName}-${point.dateKey}`}
+                              className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600"
+                            >
+                              {point.label} {point.total}건
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
         </div>
 
 
@@ -2501,10 +2760,125 @@ export default function ReturnRecordApp() {
               </Card>
 
               <Card className="rounded-[2rem] shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <CheckCircle2 className="h-5 w-5 text-slate-500" />
+                    모델별 정상 건수 / 불량 건수
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">
+                    선택 기간에 들어온 전체 모델을 기준으로 정상확인과 불량판정을 비교합니다.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {selectedReportSummary.modelInspectionRows.length === 0 ? (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+                      선택 기간에 집계할 모델별 기록이 없습니다.
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      {selectedReportSummary.modelInspectionRows.map((row) => (
+                        <div
+                          key={`model-report-count-${row.productName}`}
+                          className="rounded-3xl border border-slate-200 bg-white p-5"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-bold text-slate-900">{row.productName}</p>
+                              <p className="mt-1 text-sm text-slate-500">입고 {row.total}건</p>
+                            </div>
+                            <span className="rounded-full bg-slate-900 px-3 py-1 text-sm font-bold text-white">
+                              {row.total}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+                              <p className="text-xs font-semibold text-emerald-700">정상확인</p>
+                              <p className="mt-1 text-2xl font-bold text-emerald-700">{row.normal}</p>
+                              <p className="text-xs text-emerald-700/70">{row.normalRate}%</p>
+                            </div>
+                            <div className="rounded-2xl border border-rose-100 bg-rose-50 p-3">
+                              <p className="text-xs font-semibold text-rose-700">불량판정</p>
+                              <p className="mt-1 text-2xl font-bold text-rose-700">{row.defective}</p>
+                              <p className="text-xs text-rose-700/70">{row.defectRate}%</p>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-rose-500 transition-all"
+                              style={{ width: `${Math.max(row.defectRate, row.defective > 0 ? 4 : 0)}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-[2rem] shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <Clock3 className="h-5 w-5 text-slate-500" />
+                    모델별 입고 추이
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">
+                    등록일자 기준으로 모델별 입고 흐름을 확인합니다.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {selectedReportSummary.modelInspectionRows.length === 0 ? (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+                      선택 기간에 모델별 입고 추이 데이터가 없습니다.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {selectedReportSummary.modelInspectionRows.map((row) => (
+                        <div
+                          key={`model-report-trend-${row.productName}`}
+                          className="rounded-3xl border border-slate-200 bg-slate-50 p-5"
+                        >
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="font-bold text-slate-900">{row.productName}</p>
+                            <p className="text-sm text-slate-500">
+                              총 {row.total}건 · 정상 {row.normal}건 · 불량 {row.defective}건
+                            </p>
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {row.trendRows.slice(-10).map((point) => {
+                              const pointPercent = calculatePercent(point.total, row.total || point.total);
+
+                              return (
+                                <div key={`model-report-trend-${row.productName}-${point.dateKey}`} className="space-y-1">
+                                  <div className="flex items-center justify-between text-xs text-slate-500">
+                                    <span className="font-semibold text-slate-700">{point.label}</span>
+                                    <span>
+                                      전체 {point.total}건 · 정상 {point.normal}건 · 불량 {point.defective}건
+                                    </span>
+                                  </div>
+                                  <div className="h-2 overflow-hidden rounded-full bg-white">
+                                    <div
+                                      className="h-full rounded-full bg-slate-800 transition-all"
+                                      style={{ width: `${Math.max(pointPercent, point.total > 0 ? 4 : 0)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-[2rem] shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-xl">
                 <Smartphone className="h-5 w-5 text-slate-500" />
-                모델별 불량 리포트
+                불량 건수 / 불량내역
               </CardTitle>
               <p className="text-sm text-slate-500">
                 선택 기간의 불량판정 건을 제품명과 비고 키워드로 정리합니다.

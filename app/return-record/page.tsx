@@ -44,13 +44,7 @@ type ReturnType =
 
 type ProductType = string;
 
-type ProductSelectValue =
-  | "휴대용분유포트"
-  | "(분리형) 휴대용분유포트"
-  | "분유쉐이커"
-  | "LED분유쉐이커"
-  | "젖병살균세척기"
-  | "직접입력";
+type ProductSelectValue = string;
 
 type ProcessAction =
   | "미선택"
@@ -236,8 +230,11 @@ const DEFECTIVE_NOTE_OPTIONS = [
 ];
 
 const CUSTOM_DEFECTIVE_NOTE_OPTIONS_API_PATH = "/api/note-options";
+const PRODUCT_OPTIONS_API_PATH = "/api/product-options";
 const LEGACY_CUSTOM_DEFECTIVE_NOTE_OPTIONS_STORAGE_KEY =
   "return-record-custom-defective-note-options";
+const LEGACY_CUSTOM_PRODUCT_OPTIONS_STORAGE_KEY =
+  "return-record-custom-product-options";
 
 function normalizeNoteOptionText(value: string) {
   return value.replace(/\s+/g, " ").trim();
@@ -248,6 +245,24 @@ function getUniqueNoteOptions(options: string[]) {
 
   options.forEach((option) => {
     const normalized = normalizeNoteOptionText(option);
+
+    if (normalized) {
+      optionSet.add(normalized);
+    }
+  });
+
+  return Array.from(optionSet);
+}
+
+function normalizeProductOptionText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function getUniqueProductOptions(options: string[]) {
+  const optionSet = new Set<string>();
+
+  options.forEach((option) => {
+    const normalized = normalizeProductOptionText(option);
 
     if (normalized) {
       optionSet.add(normalized);
@@ -1790,8 +1805,11 @@ export default function ReturnRecordApp() {
   const [customDefectiveNoteOptions, setCustomDefectiveNoteOptions] = useState<
     string[]
   >([]);
+  const [customProductOptions, setCustomProductOptions] = useState<string[]>([]);
   const [loadingNoteOptions, setLoadingNoteOptions] = useState(false);
   const [savingNoteOption, setSavingNoteOption] = useState(false);
+  const [loadingProductOptions, setLoadingProductOptions] = useState(false);
+  const [savingProductOption, setSavingProductOption] = useState(false);
 
   const [invoicePhotos, setInvoicePhotos] = useState<UploadedPhoto[]>([]);
   const [productPhotos, setProductPhotos] = useState<UploadedPhoto[]>([]);
@@ -1932,9 +1950,109 @@ export default function ReturnRecordApp() {
     }
   }
 
+  function getLegacyCustomProductOptions() {
+    try {
+      const storedOptions = window.localStorage.getItem(
+        LEGACY_CUSTOM_PRODUCT_OPTIONS_STORAGE_KEY
+      );
+
+      if (!storedOptions) return [];
+
+      const parsedOptions = JSON.parse(storedOptions);
+
+      if (!Array.isArray(parsedOptions)) return [];
+
+      return getUniqueProductOptions(parsedOptions.map((item) => String(item)));
+    } catch {
+      window.localStorage.removeItem(LEGACY_CUSTOM_PRODUCT_OPTIONS_STORAGE_KEY);
+      return [];
+    }
+  }
+
+  async function fetchCustomProductOptions() {
+    try {
+      setLoadingProductOptions(true);
+
+      const response = await fetch(PRODUCT_OPTIONS_API_PATH, {
+        cache: "no-store",
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "제품명 목록 조회에 실패했습니다.");
+      }
+
+      let nextOptions = getUniqueProductOptions(
+        Array.isArray(data.customProductOptions)
+          ? data.customProductOptions.map((item: unknown) => String(item))
+          : []
+      );
+
+      const baseProductOptions = PRODUCT_TYPES.filter(
+        (item) => item !== "직접입력"
+      );
+      const legacyOptions = getLegacyCustomProductOptions();
+      const optionsToMigrate = legacyOptions.filter(
+        (option) =>
+          option !== "직접입력" &&
+          !baseProductOptions.includes(option) &&
+          !nextOptions.includes(option)
+      );
+
+      if (optionsToMigrate.length > 0) {
+        const migrateResponse = await fetch(PRODUCT_OPTIONS_API_PATH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ options: optionsToMigrate }),
+        });
+        const migrateData = await migrateResponse.json();
+
+        if (!migrateResponse.ok) {
+          throw new Error(
+            migrateData?.error || "기존 제품명 서버 저장에 실패했습니다."
+          );
+        }
+
+        nextOptions = getUniqueProductOptions(
+          Array.isArray(migrateData.customProductOptions)
+            ? migrateData.customProductOptions.map((item: unknown) =>
+                String(item)
+              )
+            : nextOptions
+        );
+
+        window.localStorage.removeItem(LEGACY_CUSTOM_PRODUCT_OPTIONS_STORAGE_KEY);
+      }
+
+      setCustomProductOptions(nextOptions);
+    } catch (error) {
+      setStatusError(
+        error instanceof Error
+          ? error.message
+          : "제품명 목록을 불러오지 못했습니다."
+      );
+    } finally {
+      setLoadingProductOptions(false);
+    }
+  }
+
   useEffect(() => {
     fetchCustomDefectiveNoteOptions();
   }, []);
+
+  useEffect(() => {
+    fetchCustomProductOptions();
+  }, []);
+
+  const productOptionsForSelect = useMemo(
+    () =>
+      getUniqueProductOptions([
+        ...PRODUCT_TYPES.filter((item) => item !== "직접입력"),
+        ...customProductOptions,
+        "직접입력",
+      ]),
+    [customProductOptions]
+  );
 
   const defectiveNoteOptionsForReport = useMemo(
     () => getNoteOptionsByInspectionResult(
@@ -2038,14 +2156,14 @@ export default function ReturnRecordApp() {
 
   const productFilterOptions = useMemo(() => {
     const productSet = new Set<string>();
-    PRODUCT_TYPES.filter((item) => item !== "직접입력").forEach((item) =>
-      productSet.add(item)
-    );
+    productOptionsForSelect
+      .filter((item) => item !== "직접입력")
+      .forEach((item) => productSet.add(item));
     records.forEach((record) => {
       if (record.productName) productSet.add(record.productName);
     });
     return Array.from(productSet);
-  }, [records]);
+  }, [records, productOptionsForSelect]);
 
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
@@ -2183,6 +2301,61 @@ export default function ReturnRecordApp() {
     }
   }
 
+  async function handleAddProductOption(
+    onAdded?: (nextOption: ProductSelectValue) => void
+  ) {
+    const inputValue = window.prompt("추가할 제품명을 입력해주세요.");
+    const nextOption = normalizeProductOptionText(inputValue || "");
+
+    if (!nextOption) return;
+
+    if (nextOption === "직접입력") {
+      setStatusMessage("");
+      setStatusError("'직접입력'은 기본 항목이라 추가할 수 없습니다.");
+      return;
+    }
+
+    if (productOptionsForSelect.includes(nextOption)) {
+      onAdded?.(nextOption);
+      setStatusMessage(`이미 등록된 제품명 '${nextOption}'을 선택했습니다.`);
+      setStatusError("");
+      return;
+    }
+
+    try {
+      setSavingProductOption(true);
+      setStatusError("");
+
+      const response = await fetch(PRODUCT_OPTIONS_API_PATH, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ option: nextOption }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "제품명 저장에 실패했습니다.");
+      }
+
+      const nextCustomOptions = getUniqueProductOptions(
+        Array.isArray(data.customProductOptions)
+          ? data.customProductOptions.map((item: unknown) => String(item))
+          : [...customProductOptions, nextOption]
+      );
+
+      setCustomProductOptions(nextCustomOptions);
+      onAdded?.(nextOption);
+      setStatusMessage(`제품명 '${nextOption}'가 서버에 추가되었습니다.`);
+    } catch (error) {
+      setStatusMessage("");
+      setStatusError(
+        error instanceof Error ? error.message : "제품명 저장에 실패했습니다."
+      );
+    } finally {
+      setSavingProductOption(false);
+    }
+  }
+
   function resetForm() {
     setInvoiceNumber("");
     setOrderNumber("");
@@ -2214,7 +2387,7 @@ export default function ReturnRecordApp() {
       return "젖병살균세척기";
     }
 
-    if (value && PRODUCT_TYPES.includes(value as ProductSelectValue)) {
+    if (value && productOptionsForSelect.includes(value as ProductSelectValue)) {
       return value;
     }
 
@@ -2463,7 +2636,7 @@ export default function ReturnRecordApp() {
     );
 
     if (normalizedProductName) {
-      if (PRODUCT_TYPES.includes(normalizedProductName as ProductSelectValue)) {
+      if (productOptionsForSelect.includes(normalizedProductName as ProductSelectValue)) {
         setProductName(normalizedProductName as ProductSelectValue);
         setCustomProductName("");
       } else {
@@ -2647,7 +2820,7 @@ export default function ReturnRecordApp() {
     setOrderNumber(record.orderNumber || "");
     setCustomerName(record.customerName || "");
     setReturnType(record.returnType);
-    if (PRODUCT_TYPES.includes(record.productName as ProductSelectValue)) {
+    if (productOptionsForSelect.includes(record.productName as ProductSelectValue)) {
       setProductName(record.productName as ProductSelectValue);
       setCustomProductName("");
     } else {
@@ -2677,7 +2850,7 @@ export default function ReturnRecordApp() {
   }
 
   function makeInlineEditDraft(record: ReturnRecord): InlineEditDraft {
-    const isKnownProduct = PRODUCT_TYPES.includes(
+    const isKnownProduct = productOptionsForSelect.includes(
       record.productName as ProductSelectValue
     );
 
@@ -3721,7 +3894,23 @@ export default function ReturnRecordApp() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>제품명</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>제품명</Label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleAddProductOption((nextOption) => {
+                          setProductName(nextOption);
+                          setCustomProductName("");
+                        })
+                      }
+                      disabled={savingProductOption || loadingProductOptions}
+                      className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="제품명 서버 추가"
+                    >
+                      {savingProductOption ? "저장중" : "+"}
+                    </button>
+                  </div>
                   <Select
                     value={productName}
                     onValueChange={(value) => {
@@ -3735,7 +3924,7 @@ export default function ReturnRecordApp() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {PRODUCT_TYPES.map((item) => (
+                      {productOptionsForSelect.map((item) => (
                         <SelectItem key={item} value={item}>
                           {item}
                         </SelectItem>
@@ -4481,7 +4670,30 @@ export default function ReturnRecordApp() {
                               </div>
 
                               <div className="space-y-2">
-                                <Label>제품명</Label>
+                                <div className="flex items-center justify-between gap-2">
+                                  <Label>제품명</Label>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleAddProductOption((nextOption) =>
+                                        setInlineEditDraft((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                productName: nextOption,
+                                                customProductName: "",
+                                              }
+                                            : prev
+                                        )
+                                      )
+                                    }
+                                    disabled={savingProductOption || loadingProductOptions}
+                                    className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    title="제품명 서버 추가"
+                                  >
+                                    {savingProductOption ? "저장중" : "+"}
+                                  </button>
+                                </div>
                                 <Select
                                   value={inlineEditDraft.productName}
                                   onValueChange={(value) =>
@@ -4503,7 +4715,7 @@ export default function ReturnRecordApp() {
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {PRODUCT_TYPES.map((item) => (
+                                    {productOptionsForSelect.map((item) => (
                                       <SelectItem key={item} value={item}>
                                         {item}
                                       </SelectItem>

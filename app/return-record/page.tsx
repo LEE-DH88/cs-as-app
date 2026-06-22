@@ -107,7 +107,7 @@ type OcrParsedResult = {
 };
 
 type ReportRange = "all" | "month" | "week" | "today";
-type ActivePanel = "dashboard" | "modelReport" | "records" | "form";
+type ActivePanel = "dashboard" | "normalizationReport" | "modelReport" | "records" | "form";
 
 type ReportDateKeys = {
   todayKey: string;
@@ -295,6 +295,10 @@ function isNormalInspectionResult(value?: string) {
 
 function isDefectiveInspectionResult(value?: string) {
   return DEFECTIVE_INSPECTION_RESULTS.includes(value as InspectionResult);
+}
+
+function isGeneralOrChangeReturnType(value?: string) {
+  return value === "일반반품" || value === "변심반품";
 }
 
 function calculatePercent(count: number, total: number) {
@@ -2116,6 +2120,28 @@ export default function ReturnRecordApp() {
     [reportRecords, defectiveNoteOptionsForReport]
   );
 
+  const normalizationReportRecords = useMemo(
+    () => reportRecords.filter((record) => isGeneralOrChangeReturnType(record.returnType)),
+    [reportRecords]
+  );
+
+  const selectedNormalizationReportSummary = useMemo(
+    () => buildReportSummary(normalizationReportRecords, defectiveNoteOptionsForReport),
+    [normalizationReportRecords, defectiveNoteOptionsForReport]
+  );
+
+  const normalizationProductChartRows = useMemo<ComboChartRow[]>(
+    () =>
+      selectedNormalizationReportSummary.modelInspectionRows.map((row) => ({
+        id: row.productName,
+        label: row.productName,
+        total: row.total,
+        normal: row.normal,
+        defective: row.defective,
+      })),
+    [selectedNormalizationReportSummary.modelInspectionRows]
+  );
+
   const reportOverviewRows = useMemo(() => {
     return REPORT_RANGE_OPTIONS.map((option) => {
       let rangeRecords = records;
@@ -3267,6 +3293,27 @@ export default function ReturnRecordApp() {
                   <button
                     type="button"
                     onClick={() => {
+                      setActivePanel("normalizationReport");
+                      setReportRange("all");
+                    }}
+                    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
+                      activePanel === "normalizationReport"
+                        ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-emerald-50"
+                    }`}
+                  >
+                    <span>
+                      <span className="block text-sm font-bold">일반/변심 정상화 리포트</span>
+                      <span className={`block text-xs ${activePanel === "normalizationReport" ? "text-emerald-100" : "text-slate-500"}`}>
+                        일반 · 변심만 별도 집계
+                      </span>
+                    </span>
+                    <CheckCircle2 className="h-4 w-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
                       setActivePanel("modelReport");
                       setReportRange("all");
                     }}
@@ -3630,6 +3677,191 @@ export default function ReturnRecordApp() {
         </div>
 
 
+            )}
+
+            {activePanel === "normalizationReport" && (
+              <div className="space-y-5">
+                <Card className="rounded-[2rem] border-emerald-100 bg-gradient-to-br from-white to-emerald-50 shadow-sm">
+                  <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-600">정상화 리포트</p>
+                      <CardTitle className="mt-1 text-2xl">일반/변심 정상화 리포트</CardTitle>
+                      <p className="mt-2 text-sm leading-6 text-slate-500">
+                        일반반품과 변심반품만 따로 모아 정상 확인, 불량 판정, 정상화율을 확인합니다.
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        제외: 불량반품 · 불량교환 · AS · 검수
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {REPORT_RANGE_OPTIONS.map((option) => (
+                        <button
+                          key={`normalization-range-${option.value}`}
+                          type="button"
+                          onClick={() => setReportRange(option.value)}
+                          className={`rounded-2xl border px-4 py-2 text-left transition ${
+                            reportRange === option.value
+                              ? "border-emerald-600 bg-emerald-600 text-white"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-emerald-50"
+                          }`}
+                        >
+                          <span className="block text-sm font-bold">{option.label}</span>
+                          <span className="block text-xs opacity-70">{option.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                      <div className="rounded-3xl border bg-white p-4">
+                        <p className="text-xs font-semibold text-slate-500">전체 건수</p>
+                        <p className="mt-2 text-3xl font-bold text-slate-900">
+                          {selectedNormalizationReportSummary.total}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">일반/변심 기준</p>
+                      </div>
+                      <div className="rounded-3xl border border-emerald-100 bg-white p-4">
+                        <p className="text-xs font-semibold text-emerald-600">정상 확인</p>
+                        <p className="mt-2 text-3xl font-bold text-emerald-600">
+                          {selectedNormalizationReportSummary.normal}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">정상화 가능 건수</p>
+                      </div>
+                      <div className="rounded-3xl border border-rose-100 bg-white p-4">
+                        <p className="text-xs font-semibold text-rose-600">불량 판정</p>
+                        <p className="mt-2 text-3xl font-bold text-rose-600">
+                          {selectedNormalizationReportSummary.defective}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">일반/변심 중 불량</p>
+                      </div>
+                      <div className="rounded-3xl border border-emerald-200 bg-emerald-600 p-4 text-white">
+                        <p className="text-xs font-semibold text-emerald-100">정상화율</p>
+                        <p className="mt-2 text-3xl font-bold">
+                          {selectedNormalizationReportSummary.normalRate}%
+                        </p>
+                        <p className="mt-1 text-xs text-emerald-100/80">정상 확인 ÷ 전체 건수</p>
+                      </div>
+                      <div className="rounded-3xl border border-slate-200 bg-slate-950 p-4 text-white">
+                        <p className="text-xs font-semibold text-slate-300">일반/변심 불량률</p>
+                        <p className="mt-2 text-3xl font-bold">
+                          {selectedNormalizationReportSummary.defectRate}%
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">불량 판정 ÷ 전체 건수</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-[2rem] shadow-sm">
+                  <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2 text-xl">
+                        <Clock3 className="h-5 w-5 text-slate-500" />
+                        정상화 추이
+                      </CardTitle>
+                      <p className="mt-2 text-sm text-slate-500">
+                        {reportRange === "today"
+                          ? "오늘 일반/변심 기록의 정상 확인과 불량 판정을 확인합니다."
+                          : reportRange === "week"
+                            ? "이번주는 일반/변심 기록을 일별로 나눠 봅니다."
+                            : "전체기록과 이번달은 일반/변심 기록을 주별로 나눠 봅니다."}
+                      </p>
+                    </div>
+                    <span className="w-fit rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                      일반/변심 전용
+                    </span>
+                  </CardHeader>
+                  <CardContent>
+                    {reportRange === "today" ? (
+                      <ComboBarRateChart
+                        rows={[
+                          {
+                            id: reportDateKeys.todayKey,
+                            label: "오늘",
+                            total: selectedNormalizationReportSummary.total,
+                            normal: selectedNormalizationReportSummary.normal,
+                            defective: selectedNormalizationReportSummary.defective,
+                          },
+                        ]}
+                        emptyText="오늘 일반/변심 정상화 데이터가 없습니다."
+                        height={300}
+                      />
+                    ) : reportRange === "week" ? (
+                      <DailyInspectionTrendChart
+                        rows={selectedNormalizationReportSummary.overallTrendRows}
+                        startKey={reportDateKeys.weekStartKey}
+                        endKey={reportDateKeys.weekEndKey}
+                      />
+                    ) : (
+                      <WeeklyInspectionTrendChart
+                        rows={selectedNormalizationReportSummary.overallWeeklyTrendRows}
+                        maxWeeks={reportRange === "month" ? 6 : 8}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-[2rem] shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-xl">
+                      <Smartphone className="h-5 w-5 text-slate-500" />
+                      제품별 정상화 추이
+                    </CardTitle>
+                    <p className="text-sm text-slate-500">
+                      일반반품과 변심반품만 기준으로 제품별 전체 건수, 정상 확인, 불량 판정을 비교합니다.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    <ComboBarRateChart
+                      rows={normalizationProductChartRows}
+                      emptyText="선택 기간에 일반/변심 제품별 정상화 데이터가 없습니다."
+                      height={380}
+                    />
+
+                    {selectedNormalizationReportSummary.modelInspectionRows.length > 0 && (
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        {selectedNormalizationReportSummary.modelInspectionRows.map((row) => (
+                          <div
+                            key={`normalization-product-card-${row.productName}`}
+                            className="rounded-3xl border border-slate-200 bg-white p-5"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-bold text-slate-900">{row.productName}</p>
+                                <p className="mt-1 text-sm text-slate-500">전체 {row.total}건</p>
+                              </div>
+                              <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-700">
+                                정상화율 {row.normalRate}%
+                              </span>
+                            </div>
+
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+                                <p className="text-xs font-semibold text-emerald-700">정상 확인</p>
+                                <p className="mt-1 text-2xl font-bold text-emerald-700">{row.normal}</p>
+                              </div>
+                              <div className="rounded-2xl border border-rose-100 bg-rose-50 p-3">
+                                <p className="text-xs font-semibold text-rose-700">불량 판정</p>
+                                <p className="mt-1 text-2xl font-bold text-rose-700">{row.defective}</p>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+                              <div
+                                className="h-full rounded-full bg-emerald-500 transition-all"
+                                style={{ width: `${Math.max(row.normalRate, row.normal > 0 ? 4 : 0)}%` }}
+                              />
+                            </div>
+                            <p className="mt-2 text-xs text-slate-500">
+                              일반/변심 불량률 {row.defectRate}%
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             )}
 
             {activePanel === "modelReport" && (

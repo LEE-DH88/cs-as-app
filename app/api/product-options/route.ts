@@ -37,6 +37,20 @@ function getCustomOnlyOptions(options: string[]) {
   );
 }
 
+function isDefaultProductOption(option: string) {
+  return DEFAULT_PRODUCT_OPTIONS.includes(normalizeProductOptionText(option));
+}
+
+function getProductOptionsPayload(customProductOptions: string[]) {
+  return {
+    customProductOptions,
+    productOptions: getUniqueProductOptions([
+      ...DEFAULT_PRODUCT_OPTIONS,
+      ...customProductOptions,
+    ]),
+  };
+}
+
 async function readCustomProductOptions() {
   const { blobs } = await list({
     prefix: PRODUCT_OPTIONS_BLOB_PATH,
@@ -93,13 +107,7 @@ export async function GET() {
   try {
     const customProductOptions = await readCustomProductOptions();
 
-    return NextResponse.json({
-      customProductOptions,
-      productOptions: getUniqueProductOptions([
-        ...DEFAULT_PRODUCT_OPTIONS,
-        ...customProductOptions,
-      ]),
-    });
+    return NextResponse.json(getProductOptionsPayload(customProductOptions));
   } catch (error) {
     return NextResponse.json(
       {
@@ -138,13 +146,7 @@ export async function POST(request: Request) {
       ...normalizedIncomingOptions,
     ]);
 
-    return NextResponse.json({
-      customProductOptions,
-      productOptions: getUniqueProductOptions([
-        ...DEFAULT_PRODUCT_OPTIONS,
-        ...customProductOptions,
-      ]),
-    });
+    return NextResponse.json(getProductOptionsPayload(customProductOptions));
   } catch (error) {
     return NextResponse.json(
       {
@@ -152,6 +154,139 @@ export async function POST(request: Request) {
           error instanceof Error
             ? error.message
             : "제품명 저장에 실패했습니다.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const currentOption = normalizeProductOptionText(
+      typeof body?.option === "string" ? body.option : ""
+    );
+    const nextOption = normalizeProductOptionText(
+      typeof body?.nextOption === "string" ? body.nextOption : ""
+    );
+
+    if (!currentOption || !nextOption) {
+      return NextResponse.json(
+        { error: "수정할 제품명과 변경할 제품명을 입력해주세요." },
+        { status: 400 }
+      );
+    }
+
+    if (currentOption === "직접입력" || nextOption === "직접입력") {
+      return NextResponse.json(
+        { error: "'직접입력'은 수정할 수 없습니다." },
+        { status: 400 }
+      );
+    }
+
+    if (isDefaultProductOption(currentOption)) {
+      return NextResponse.json(
+        { error: "기본 제품명은 보호 항목이라 수정할 수 없습니다." },
+        { status: 400 }
+      );
+    }
+
+    const currentCustomProductOptions = await readCustomProductOptions();
+
+    if (!currentCustomProductOptions.includes(currentOption)) {
+      return NextResponse.json(
+        { error: "수정할 제품명을 찾지 못했습니다." },
+        { status: 404 }
+      );
+    }
+
+    if (currentOption === nextOption) {
+      return NextResponse.json(
+        getProductOptionsPayload(currentCustomProductOptions)
+      );
+    }
+
+    const duplicated = getUniqueProductOptions([
+      ...DEFAULT_PRODUCT_OPTIONS,
+      ...currentCustomProductOptions.filter((option) => option !== currentOption),
+    ]).includes(nextOption);
+
+    if (duplicated) {
+      return NextResponse.json(
+        { error: "이미 등록된 제품명입니다." },
+        { status: 409 }
+      );
+    }
+
+    const customProductOptions = await writeCustomProductOptions(
+      currentCustomProductOptions.map((option) =>
+        option === currentOption ? nextOption : option
+      )
+    );
+
+    return NextResponse.json(getProductOptionsPayload(customProductOptions));
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "제품명 수정에 실패했습니다.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const option = normalizeProductOptionText(
+      typeof body?.option === "string" ? body.option : ""
+    );
+
+    if (!option) {
+      return NextResponse.json(
+        { error: "삭제할 제품명을 입력해주세요." },
+        { status: 400 }
+      );
+    }
+
+    if (option === "직접입력") {
+      return NextResponse.json(
+        { error: "'직접입력'은 삭제할 수 없습니다." },
+        { status: 400 }
+      );
+    }
+
+    if (isDefaultProductOption(option)) {
+      return NextResponse.json(
+        { error: "기본 제품명은 보호 항목이라 삭제할 수 없습니다." },
+        { status: 400 }
+      );
+    }
+
+    const currentCustomProductOptions = await readCustomProductOptions();
+
+    if (!currentCustomProductOptions.includes(option)) {
+      return NextResponse.json(
+        { error: "삭제할 제품명을 찾지 못했습니다." },
+        { status: 404 }
+      );
+    }
+
+    const customProductOptions = await writeCustomProductOptions(
+      currentCustomProductOptions.filter((item) => item !== option)
+    );
+
+    return NextResponse.json(getProductOptionsPayload(customProductOptions));
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "제품명 삭제에 실패했습니다.",
       },
       { status: 500 }
     );

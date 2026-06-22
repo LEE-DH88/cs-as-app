@@ -1814,6 +1814,9 @@ export default function ReturnRecordApp() {
   const [savingNoteOption, setSavingNoteOption] = useState(false);
   const [loadingProductOptions, setLoadingProductOptions] = useState(false);
   const [savingProductOption, setSavingProductOption] = useState(false);
+  const [productManagerOpen, setProductManagerOpen] = useState(false);
+  const [editingProductOption, setEditingProductOption] = useState<string | null>(null);
+  const [editingProductOptionValue, setEditingProductOptionValue] = useState("");
 
   const [invoicePhotos, setInvoicePhotos] = useState<UploadedPhoto[]>([]);
   const [productPhotos, setProductPhotos] = useState<UploadedPhoto[]>([]);
@@ -2056,6 +2059,41 @@ export default function ReturnRecordApp() {
         "직접입력",
       ]),
     [customProductOptions]
+  );
+
+  const productUsageCounts = useMemo(() => {
+    const usageMap: Record<string, number> = {};
+
+    records.forEach((record) => {
+      const normalizedProductName = normalizeProductOptionText(
+        record.productName || ""
+      );
+
+      if (!normalizedProductName) return;
+
+      usageMap[normalizedProductName] =
+        (usageMap[normalizedProductName] || 0) + 1;
+    });
+
+    return usageMap;
+  }, [records]);
+
+  const productManagerRows = useMemo(
+    () =>
+      productOptionsForSelect
+        .filter((item) => item !== "직접입력")
+        .map((item) => {
+          const normalizedOption = normalizeProductOptionText(item);
+          const isCustom = customProductOptions.includes(normalizedOption);
+
+          return {
+            name: normalizedOption,
+            isCustom,
+            isDefault: !isCustom,
+            usageCount: productUsageCounts[normalizedOption] || 0,
+          };
+        }),
+    [customProductOptions, productOptionsForSelect, productUsageCounts]
   );
 
   const defectiveNoteOptionsForReport = useMemo(
@@ -2376,6 +2414,180 @@ export default function ReturnRecordApp() {
       setStatusMessage("");
       setStatusError(
         error instanceof Error ? error.message : "제품명 저장에 실패했습니다."
+      );
+    } finally {
+      setSavingProductOption(false);
+    }
+  }
+
+  function applyProductOptionsResponse(data: any, fallbackOptions: string[]) {
+    const nextCustomOptions = getUniqueProductOptions(
+      Array.isArray(data?.customProductOptions)
+        ? data.customProductOptions.map((item: unknown) => String(item))
+        : fallbackOptions
+    );
+
+    setCustomProductOptions(nextCustomOptions);
+
+    return nextCustomOptions;
+  }
+
+  function startEditProductOption(option: string) {
+    if (!customProductOptions.includes(option)) {
+      setStatusMessage("");
+      setStatusError("기본 제품명은 보호 항목이라 수정할 수 없습니다.");
+      return;
+    }
+
+    setEditingProductOption(option);
+    setEditingProductOptionValue(option);
+    setStatusError("");
+  }
+
+  function cancelEditProductOption() {
+    setEditingProductOption(null);
+    setEditingProductOptionValue("");
+  }
+
+  async function handleRenameProductOption(option: string) {
+    const currentOption = normalizeProductOptionText(option);
+    const nextOption = normalizeProductOptionText(editingProductOptionValue);
+
+    if (!currentOption || !nextOption) {
+      setStatusMessage("");
+      setStatusError("변경할 제품명을 입력해주세요.");
+      return;
+    }
+
+    if (nextOption === "직접입력") {
+      setStatusMessage("");
+      setStatusError("'직접입력'은 제품명으로 사용할 수 없습니다.");
+      return;
+    }
+
+    if (currentOption === nextOption) {
+      cancelEditProductOption();
+      return;
+    }
+
+    if (productOptionsForSelect.includes(nextOption)) {
+      setStatusMessage("");
+      setStatusError("이미 등록된 제품명입니다.");
+      return;
+    }
+
+    try {
+      setSavingProductOption(true);
+      setStatusError("");
+
+      const response = await fetch(PRODUCT_OPTIONS_API_PATH, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ option: currentOption, nextOption }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "제품명 수정에 실패했습니다.");
+      }
+
+      applyProductOptionsResponse(
+        data,
+        customProductOptions.map((item) =>
+          item === currentOption ? nextOption : item
+        )
+      );
+
+      if (productName === currentOption) {
+        setProductName(nextOption);
+      }
+
+      if (filterProduct === currentOption) {
+        setFilterProduct(nextOption);
+      }
+
+      setInlineEditDraft((prev) =>
+        prev && prev.productName === currentOption
+          ? { ...prev, productName: nextOption }
+          : prev
+      );
+
+      cancelEditProductOption();
+      setStatusMessage(
+        `제품명 '${currentOption}'을 '${nextOption}'로 수정했습니다. 기존 기록은 변경되지 않습니다.`
+      );
+    } catch (error) {
+      setStatusMessage("");
+      setStatusError(
+        error instanceof Error ? error.message : "제품명 수정에 실패했습니다."
+      );
+    } finally {
+      setSavingProductOption(false);
+    }
+  }
+
+  async function handleDeleteProductOption(option: string) {
+    const currentOption = normalizeProductOptionText(option);
+
+    if (!customProductOptions.includes(currentOption)) {
+      setStatusMessage("");
+      setStatusError("기본 제품명은 보호 항목이라 삭제할 수 없습니다.");
+      return;
+    }
+
+    const usageCount = productUsageCounts[currentOption] || 0;
+    const confirmed = window.confirm(
+      `'${currentOption}' 제품명을 선택 목록에서 삭제할까요?\n기존 기록 ${usageCount}건은 삭제되지 않고 그대로 유지됩니다.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setSavingProductOption(true);
+      setStatusError("");
+
+      const response = await fetch(PRODUCT_OPTIONS_API_PATH, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ option: currentOption }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "제품명 삭제에 실패했습니다.");
+      }
+
+      applyProductOptionsResponse(
+        data,
+        customProductOptions.filter((item) => item !== currentOption)
+      );
+
+      if (productName === currentOption) {
+        setProductName("휴대용분유포트");
+        setCustomProductName("");
+      }
+
+      if (filterProduct === currentOption) {
+        setFilterProduct("전체");
+      }
+
+      setInlineEditDraft((prev) =>
+        prev && prev.productName === currentOption
+          ? { ...prev, productName: "휴대용분유포트", customProductName: "" }
+          : prev
+      );
+
+      if (editingProductOption === currentOption) {
+        cancelEditProductOption();
+      }
+
+      setStatusMessage(
+        `제품명 '${currentOption}'을 선택 목록에서 삭제했습니다. 기존 기록은 유지됩니다.`
+      );
+    } catch (error) {
+      setStatusMessage("");
+      setStatusError(
+        error instanceof Error ? error.message : "제품명 삭제에 실패했습니다."
       );
     } finally {
       setSavingProductOption(false);
@@ -4128,20 +4340,31 @@ export default function ReturnRecordApp() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <Label>제품명</Label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleAddProductOption((nextOption) => {
-                          setProductName(nextOption);
-                          setCustomProductName("");
-                        })
-                      }
-                      disabled={savingProductOption || loadingProductOptions}
-                      className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      title="제품명 서버 추가"
-                    >
-                      {savingProductOption ? "저장중" : "+"}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAddProductOption((nextOption) => {
+                            setProductName(nextOption);
+                            setCustomProductName("");
+                          })
+                        }
+                        disabled={savingProductOption || loadingProductOptions}
+                        className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        title="제품명 서버 추가"
+                      >
+                        {savingProductOption ? "저장중" : "+"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProductManagerOpen(true)}
+                        disabled={loadingProductOptions}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        title="제품명 수정/삭제"
+                      >
+                        관리
+                      </button>
+                    </div>
                   </div>
                   <Select
                     value={productName}
@@ -4904,27 +5127,38 @@ export default function ReturnRecordApp() {
                               <div className="space-y-2">
                                 <div className="flex items-center justify-between gap-2">
                                   <Label>제품명</Label>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleAddProductOption((nextOption) =>
-                                        setInlineEditDraft((prev) =>
-                                          prev
-                                            ? {
-                                                ...prev,
-                                                productName: nextOption,
-                                                customProductName: "",
-                                              }
-                                            : prev
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleAddProductOption((nextOption) =>
+                                          setInlineEditDraft((prev) =>
+                                            prev
+                                              ? {
+                                                  ...prev,
+                                                  productName: nextOption,
+                                                  customProductName: "",
+                                                }
+                                              : prev
+                                          )
                                         )
-                                      )
-                                    }
-                                    disabled={savingProductOption || loadingProductOptions}
-                                    className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    title="제품명 서버 추가"
-                                  >
-                                    {savingProductOption ? "저장중" : "+"}
-                                  </button>
+                                      }
+                                      disabled={savingProductOption || loadingProductOptions}
+                                      className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="제품명 서버 추가"
+                                    >
+                                      {savingProductOption ? "저장중" : "+"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setProductManagerOpen(true)}
+                                      disabled={loadingProductOptions}
+                                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="제품명 수정/삭제"
+                                    >
+                                      관리
+                                    </button>
+                                  </div>
                                 </div>
                                 <Select
                                   value={inlineEditDraft.productName}
@@ -5232,6 +5466,166 @@ export default function ReturnRecordApp() {
             )}
           </main>
         </div>
+
+        {productManagerOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+            <div className="w-full max-w-3xl overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl">
+              <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">제품명 관리</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                    추가한 제품명은 수정/삭제할 수 있습니다. 기본 제품명은 OCR과 리포트 기준 보호를 위해 수정/삭제할 수 없습니다.
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-2xl"
+                    onClick={fetchCustomProductOptions}
+                    disabled={loadingProductOptions || savingProductOption}
+                  >
+                    {loadingProductOptions ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    새로고침
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-2xl"
+                    onClick={() => {
+                      setProductManagerOpen(false);
+                      cancelEditProductOption();
+                    }}
+                  >
+                    닫기
+                  </Button>
+                </div>
+              </div>
+
+              <div className="max-h-[70vh] overflow-y-auto p-5">
+                <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                  삭제는 선택 목록에서만 제거합니다. 이미 저장된 기존 기록과 리포트 데이터는 그대로 유지됩니다.
+                </div>
+
+                <div className="space-y-3">
+                  {productManagerRows.length === 0 ? (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+                      등록된 제품명이 없습니다.
+                    </div>
+                  ) : (
+                    productManagerRows.map((row) => {
+                      const isEditing = editingProductOption === row.name;
+
+                      return (
+                        <div
+                          key={`product-manager-${row.name}`}
+                          className="rounded-3xl border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="min-w-0 flex-1">
+                              {isEditing ? (
+                                <Input
+                                  value={editingProductOptionValue}
+                                  onChange={(e) =>
+                                    setEditingProductOptionValue(e.target.value)
+                                  }
+                                  className="rounded-2xl bg-white"
+                                  placeholder="변경할 제품명을 입력해주세요"
+                                  disabled={savingProductOption}
+                                />
+                              ) : (
+                                <p className="break-words font-bold text-slate-900">
+                                  {row.name}
+                                </p>
+                              )}
+                              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                <span
+                                  className={`rounded-full px-3 py-1 font-semibold ${
+                                    row.isDefault
+                                      ? "bg-slate-200 text-slate-700"
+                                      : "bg-blue-100 text-blue-700"
+                                  }`}
+                                >
+                                  {row.isDefault ? "기본 제품명" : "추가 제품명"}
+                                </span>
+                                <span className="rounded-full bg-white px-3 py-1 font-semibold text-slate-600">
+                                  기존 기록 {row.usageCount}건
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              {isEditing ? (
+                                <>
+                                  <Button
+                                    type="button"
+                                    className="rounded-2xl"
+                                    onClick={() => handleRenameProductOption(row.name)}
+                                    disabled={savingProductOption}
+                                  >
+                                    {savingProductOption ? (
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : null}
+                                    저장
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-2xl"
+                                    onClick={cancelEditProductOption}
+                                    disabled={savingProductOption}
+                                  >
+                                    취소
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-2xl"
+                                    onClick={() => startEditProductOption(row.name)}
+                                    disabled={row.isDefault || savingProductOption}
+                                    title={
+                                      row.isDefault
+                                        ? "기본 제품명은 수정할 수 없습니다."
+                                        : "제품명 수정"
+                                    }
+                                  >
+                                    수정
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-2xl border-rose-200 text-rose-600 hover:bg-rose-50"
+                                    onClick={() => handleDeleteProductOption(row.name)}
+                                    disabled={row.isDefault || savingProductOption}
+                                    title={
+                                      row.isDefault
+                                        ? "기본 제품명은 삭제할 수 없습니다."
+                                        : "제품명 삭제"
+                                    }
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    삭제
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

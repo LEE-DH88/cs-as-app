@@ -283,6 +283,50 @@ const REPORT_RANGE_OPTIONS: {
   { value: "today", label: "오늘", description: "금일 검수" },
 ];
 
+const PANEL_QUERY_VALUE_MAP: Record<ActivePanel, string> = {
+  form: "form",
+  records: "records",
+  dashboard: "dashboard",
+  normalizationReport: "normalization-defect-report",
+  modelReport: "model-defect-report",
+};
+
+const TAB_QUERY_PANEL_MAP: Record<string, ActivePanel> = {
+  form: "form",
+  register: "form",
+  records: "records",
+  "record-list": "records",
+  dashboard: "dashboard",
+  "inspection-dashboard": "dashboard",
+  "normalization-report": "normalizationReport",
+  "normalization-defect-report": "normalizationReport",
+  "normalization": "normalizationReport",
+  "productization-report": "normalizationReport",
+  "productization-defect-report": "normalizationReport",
+  "general-change-normalization-report": "normalizationReport",
+  "model-report": "modelReport",
+  "model-defect-report": "modelReport",
+  "defect-report": "modelReport",
+};
+
+function getPanelFromQueryTab(value?: string | null): ActivePanel | null {
+  const normalized = (value || "").trim().toLowerCase();
+
+  if (!normalized) return null;
+
+  return TAB_QUERY_PANEL_MAP[normalized] || null;
+}
+
+function getReportRangeFromQueryValue(value?: string | null): ReportRange | null {
+  const normalized = (value || "").trim().toLowerCase();
+
+  if (REPORT_RANGE_OPTIONS.some((option) => option.value === normalized)) {
+    return normalized as ReportRange;
+  }
+
+  return null;
+}
+
 function normalizeInspectionResult(value: InspectionResult): InspectionResult {
   if (value === "정상화 완료") return "정상확인";
   if (value === "불량 판정") return "불량판정";
@@ -1840,6 +1884,79 @@ export default function ReturnRecordApp() {
   const [ocrMessage, setOcrMessage] = useState<string>("");
   const [ocrRawText, setOcrRawText] = useState<string>("");
 
+  const buildPanelUrl = (panel: ActivePanel, nextRange: ReportRange = reportRange) => {
+    if (typeof window === "undefined") return "";
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", PANEL_QUERY_VALUE_MAP[panel]);
+
+    if (panel === "dashboard" || panel === "normalizationReport" || panel === "modelReport") {
+      url.searchParams.set("range", nextRange);
+    } else {
+      url.searchParams.delete("range");
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  };
+
+  const replacePanelUrl = (panel: ActivePanel, nextRange: ReportRange = reportRange) => {
+    if (typeof window === "undefined") return;
+
+    const nextUrl = buildPanelUrl(panel, nextRange);
+    if (!nextUrl) return;
+
+    window.history.replaceState(null, "", nextUrl);
+  };
+
+  const openPanel = (
+    panel: ActivePanel,
+    options: { resetRange?: boolean } = {}
+  ) => {
+    const nextRange = options.resetRange ? "all" : reportRange;
+
+    setActivePanel(panel);
+    if (options.resetRange) {
+      setReportRange("all");
+    }
+    replacePanelUrl(panel, nextRange);
+  };
+
+  const changeReportRange = (nextRange: ReportRange) => {
+    setReportRange(nextRange);
+    replacePanelUrl(activePanel, nextRange);
+  };
+
+  useEffect(() => {
+    const applyPanelFromUrl = () => {
+      if (typeof window === "undefined") return;
+
+      const params = new URLSearchParams(window.location.search);
+      const panelFromUrl = getPanelFromQueryTab(params.get("tab"));
+      const rangeFromUrl = getReportRangeFromQueryValue(params.get("range"));
+
+      if (panelFromUrl) {
+        setActivePanel(panelFromUrl);
+      }
+
+      if (rangeFromUrl) {
+        setReportRange(rangeFromUrl);
+      } else if (
+        panelFromUrl === "dashboard" ||
+        panelFromUrl === "normalizationReport" ||
+        panelFromUrl === "modelReport"
+      ) {
+        setReportRange("all");
+      }
+    };
+
+    applyPanelFromUrl();
+    window.addEventListener("popstate", applyPanelFromUrl);
+
+    return () => {
+      window.removeEventListener("popstate", applyPanelFromUrl);
+    };
+  }, []);
+
   async function fetchRecords() {
     try {
       setLoadingRecords(true);
@@ -3079,7 +3196,7 @@ export default function ReturnRecordApp() {
 
     setStatusMessage("수정할 기록을 불러왔습니다. 내용 수정 후 수정 저장을 눌러주세요.");
     setStatusError("");
-    setActivePanel("form");
+    openPanel("form");
 
     window.scrollTo({
       top: 0,
@@ -3447,7 +3564,7 @@ export default function ReturnRecordApp() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => setActivePanel("form")}
+                    onClick={() => openPanel("form")}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "form"
                         ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
@@ -3465,7 +3582,7 @@ export default function ReturnRecordApp() {
 
                   <button
                     type="button"
-                    onClick={() => setActivePanel("records")}
+                    onClick={() => openPanel("records")}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "records"
                         ? "border-blue-600 bg-blue-600 text-white shadow-sm"
@@ -3483,10 +3600,7 @@ export default function ReturnRecordApp() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setActivePanel("dashboard");
-                      setReportRange("all");
-                    }}
+                    onClick={() => openPanel("dashboard", { resetRange: true })}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "dashboard"
                         ? "border-slate-900 bg-slate-900 text-white shadow-sm"
@@ -3504,10 +3618,7 @@ export default function ReturnRecordApp() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setActivePanel("normalizationReport");
-                      setReportRange("all");
-                    }}
+                    onClick={() => openPanel("normalizationReport", { resetRange: true })}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "normalizationReport"
                         ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
@@ -3525,10 +3636,7 @@ export default function ReturnRecordApp() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setActivePanel("modelReport");
-                      setReportRange("all");
-                    }}
+                    onClick={() => openPanel("modelReport", { resetRange: true })}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "modelReport"
                         ? "border-rose-600 bg-rose-600 text-white shadow-sm"
@@ -3573,7 +3681,7 @@ export default function ReturnRecordApp() {
                         <button
                           key={option.value}
                           type="button"
-                          onClick={() => setReportRange(option.value)}
+                          onClick={() => changeReportRange(option.value)}
                           className={`rounded-2xl border px-4 py-2 text-left transition ${
                             reportRange === option.value
                               ? "border-white bg-white text-slate-950"
@@ -3636,7 +3744,7 @@ export default function ReturnRecordApp() {
                       <button
                         key={row.value}
                         type="button"
-                        onClick={() => setReportRange(row.value)}
+                        onClick={() => changeReportRange(row.value)}
                         className={`w-full rounded-3xl border p-4 text-left transition ${
                           reportRange === row.value
                             ? "border-white bg-white text-slate-950"
@@ -3910,7 +4018,7 @@ export default function ReturnRecordApp() {
                         <button
                           key={`normalization-range-${option.value}`}
                           type="button"
-                          onClick={() => setReportRange(option.value)}
+                          onClick={() => changeReportRange(option.value)}
                           className={`rounded-2xl border px-4 py-2 text-left transition ${
                             reportRange === option.value
                               ? "border-emerald-600 bg-emerald-600 text-white"
@@ -4092,7 +4200,7 @@ export default function ReturnRecordApp() {
                       <button
                         key={`model-range-${option.value}`}
                         type="button"
-                        onClick={() => setReportRange(option.value)}
+                        onClick={() => changeReportRange(option.value)}
                         className={`rounded-2xl border px-4 py-2 text-left transition ${
                           reportRange === option.value
                             ? "border-rose-600 bg-rose-600 text-white"

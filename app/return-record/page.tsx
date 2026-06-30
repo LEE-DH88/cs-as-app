@@ -1799,6 +1799,16 @@ async function compressImage(file: File): Promise<File> {
   }
 }
 
+
+function openPhotoInNewTab(photo: UploadedPhoto) {
+  if (!photo.url) {
+    window.alert("사진 링크가 없습니다.");
+    return;
+  }
+
+  window.open(photo.url, "_blank", "noopener,noreferrer");
+}
+
 async function uploadSingleFile(
   file: File,
   folder: "invoice" | "product"
@@ -4690,33 +4700,42 @@ export default function ReturnRecordApp() {
                         </div>
                       )}
 
-                      {invoicePhotos.map((photo) => (
+                      {invoicePhotos.map((photo, index) => (
                         <div
                           key={photo.url}
-                          className="overflow-hidden rounded-2xl border bg-white"
+                          className="rounded-2xl border bg-white p-3 text-sm"
                         >
-                          <img
-                            src={photo.url}
-                            alt={photo.filename}
-                            className="h-40 w-full object-cover"
-                          />
-                          <div className="flex items-center justify-between gap-2 p-3 text-sm">
+                          <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="truncate font-medium">{photo.filename}</p>
+                              <p className="font-semibold text-slate-700">
+                                송장사진 {index + 1}
+                              </p>
+                              <p className="truncate text-sm font-medium">{photo.filename}</p>
                               <p className="text-slate-500">{formatBytes(photo.size)}</p>
                             </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="rounded-xl"
-                              onClick={() =>
-                                handleRemoveUploadedPhoto(photo, "invoice")
-                              }
-                            >
-                              <Trash2 className="mr-1 h-4 w-4" />
-                              삭제
-                            </Button>
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() => openPhotoInNewTab(photo)}
+                              >
+                                사진 보기
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() =>
+                                  handleRemoveUploadedPhoto(photo, "invoice")
+                                }
+                              >
+                                <Trash2 className="mr-1 h-4 w-4" />
+                                삭제
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -4790,33 +4809,42 @@ export default function ReturnRecordApp() {
                         </div>
                       )}
 
-                      {productPhotos.map((photo) => (
+                      {productPhotos.map((photo, index) => (
                         <div
                           key={photo.url}
-                          className="overflow-hidden rounded-2xl border bg-white"
+                          className="rounded-2xl border bg-white p-3 text-sm"
                         >
-                          <img
-                            src={photo.url}
-                            alt={photo.filename}
-                            className="h-40 w-full object-cover"
-                          />
-                          <div className="flex items-center justify-between gap-2 p-3 text-sm">
+                          <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="truncate font-medium">{photo.filename}</p>
+                              <p className="font-semibold text-slate-700">
+                                제품사진 {index + 1}
+                              </p>
+                              <p className="truncate text-sm font-medium">{photo.filename}</p>
                               <p className="text-slate-500">{formatBytes(photo.size)}</p>
                             </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="rounded-xl"
-                              onClick={() =>
-                                handleRemoveUploadedPhoto(photo, "product")
-                              }
-                            >
-                              <Trash2 className="mr-1 h-4 w-4" />
-                              삭제
-                            </Button>
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() => openPhotoInNewTab(photo)}
+                              >
+                                사진 보기
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() =>
+                                  handleRemoveUploadedPhoto(photo, "product")
+                                }
+                              >
+                                <Trash2 className="mr-1 h-4 w-4" />
+                                삭제
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -5500,28 +5528,30 @@ export default function ReturnRecordApp() {
                               </div>
                             ) : (
                               <div className="grid gap-3 sm:grid-cols-2">
-                                {record.invoicePhotos.map((photo) => (
-                                  <a
+                                {record.invoicePhotos.map((photo, index) => (
+                                  <div
                                     key={photo.url}
-                                    href={photo.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="overflow-hidden rounded-2xl border bg-white"
+                                    className="rounded-2xl border bg-white p-3 text-sm"
                                   >
-                                    <img
-                                      src={photo.url}
-                                      alt={photo.filename}
-                                      className="h-40 w-full object-cover"
-                                    />
-                                    <div className="p-3 text-sm">
-                                      <p className="truncate font-medium">
-                                        {photo.filename}
-                                      </p>
-                                      <p className="text-slate-500">
-                                        {formatBytes(photo.size)}
-                                      </p>
-                                    </div>
-                                  </a>
+                                    <p className="font-semibold text-slate-700">
+                                      송장사진 {index + 1}
+                                    </p>
+                                    <p className="mt-1 truncate font-medium">
+                                      {photo.filename}
+                                    </p>
+                                    <p className="text-slate-500">
+                                      {formatBytes(photo.size)}
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="mt-3 w-full rounded-xl"
+                                      onClick={() => openPhotoInNewTab(photo)}
+                                    >
+                                      사진 보기
+                                    </Button>
+                                  </div>
                                 ))}
                               </div>
                             )}
@@ -5535,28 +5565,30 @@ export default function ReturnRecordApp() {
                               </div>
                             ) : (
                               <div className="grid gap-3 sm:grid-cols-2">
-                                {record.productPhotos.map((photo) => (
-                                  <a
+                                {record.productPhotos.map((photo, index) => (
+                                  <div
                                     key={photo.url}
-                                    href={photo.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="overflow-hidden rounded-2xl border bg-white"
+                                    className="rounded-2xl border bg-white p-3 text-sm"
                                   >
-                                    <img
-                                      src={photo.url}
-                                      alt={photo.filename}
-                                      className="h-40 w-full object-cover"
-                                    />
-                                    <div className="p-3 text-sm">
-                                      <p className="truncate font-medium">
-                                        {photo.filename}
-                                      </p>
-                                      <p className="text-slate-500">
-                                        {formatBytes(photo.size)}
-                                      </p>
-                                    </div>
-                                  </a>
+                                    <p className="font-semibold text-slate-700">
+                                      제품사진 {index + 1}
+                                    </p>
+                                    <p className="mt-1 truncate font-medium">
+                                      {photo.filename}
+                                    </p>
+                                    <p className="text-slate-500">
+                                      {formatBytes(photo.size)}
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="mt-3 w-full rounded-xl"
+                                      onClick={() => openPhotoInNewTab(photo)}
+                                    >
+                                      사진 보기
+                                    </Button>
+                                  </div>
                                 ))}
                               </div>
                             )}

@@ -4053,100 +4053,191 @@ export default function ReturnRecordApp() {
                   </div>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <p className="px-2 text-xs font-bold uppercase tracking-wide text-slate-400">
                     메뉴
                   </p>
                   <button
                     type="button"
                     onClick={() => openPanel("form")}
-                    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
+                    className={`group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${
                       activePanel === "form"
-                        ? "border-emerald-500 bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-sm shadow-emerald-200"
-                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-200 hover:bg-emerald-50"
+                        ? "border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 shadow-sm"
+                        : "border-slate-200 bg-white/80 hover:border-emerald-200 hover:bg-emerald-50/70"
                     }`}
                   >
-                    <span>
-                      <span className="block text-sm font-bold">등록하기</span>
-                      <span className={`block text-xs ${activePanel === "form" ? "text-emerald-100" : "text-slate-500"}`}>
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm ${
+                      activePanel === "form"
+                        ? "bg-gradient-to-br from-emerald-500 to-teal-500"
+                        : "bg-gradient-to-br from-teal-400 to-emerald-400"
+                    }`}>
+                      <Camera className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-black text-slate-900">등록하기</span>
+                      <span className="block truncate text-xs font-medium text-slate-500">
                         송장 촬영 · 검수 입력
                       </span>
                     </span>
-                    <Camera className="h-4 w-4" />
+                    <span className={`text-lg font-black transition ${activePanel === "form" ? "text-emerald-500" : "text-slate-300 group-hover:text-emerald-400"}`}>
+                      ›
+                    </span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => openPanel("records")}
-                    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
+                    className={`group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${
                       activePanel === "records"
-                        ? "border-blue-500 bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-sm shadow-blue-200"
-                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-blue-200 hover:bg-blue-50"
+                        ? "border-blue-200 bg-gradient-to-r from-blue-50 to-cyan-50 shadow-sm"
+                        : "border-slate-200 bg-white/80 hover:border-blue-200 hover:bg-blue-50/70"
                     }`}
                   >
-                    <span>
-                      <span className="block text-sm font-bold">기록보기</span>
-                      <span className={`block text-xs ${activePanel === "records" ? "text-blue-100" : "text-slate-500"}`}>
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm ${
+                      activePanel === "records"
+                        ? "bg-gradient-to-br from-blue-600 to-cyan-500"
+                        : "bg-gradient-to-br from-blue-500 to-cyan-400"
+                    }`}>
+                      <Search className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-black text-slate-900">기록보기</span>
+                      <span className="block truncate text-xs font-medium text-slate-500">
                         조회 · 수정 · 삭제 · 엑셀
                       </span>
                     </span>
-                    <Search className="h-4 w-4" />
+                    <span className={`text-lg font-black transition ${activePanel === "records" ? "text-blue-500" : "text-slate-300 group-hover:text-blue-400"}`}>
+                      ›
+                    </span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => openPanel("dashboard", { resetRange: true })}
-                    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
+                    className={`group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${
                       activePanel === "dashboard"
-                        ? "border-violet-500 bg-gradient-to-r from-violet-600 to-indigo-500 text-white shadow-sm shadow-violet-200"
-                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-violet-200 hover:bg-violet-50"
+                        ? "border-violet-200 bg-gradient-to-r from-violet-50 to-indigo-50 shadow-sm"
+                        : "border-slate-200 bg-white/80 hover:border-violet-200 hover:bg-violet-50/70"
                     }`}
                   >
-                    <span>
-                      <span className="block text-sm font-bold">검수 현황판</span>
-                      <span className={`block text-xs ${activePanel === "dashboard" ? "text-slate-300" : "text-slate-500"}`}>
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm ${
+                      activePanel === "dashboard"
+                        ? "bg-gradient-to-br from-violet-600 to-indigo-500"
+                        : "bg-gradient-to-br from-violet-500 to-purple-400"
+                    }`}>
+                      <ClipboardList className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-black text-slate-900">검수 현황판</span>
+                      <span className="block truncate text-xs font-medium text-slate-500">
                         전체 · 이번달 · 이번주 · 오늘
                       </span>
                     </span>
-                    <ClipboardList className="h-4 w-4" />
+                    <span className={`text-lg font-black transition ${activePanel === "dashboard" ? "text-violet-500" : "text-slate-300 group-hover:text-violet-400"}`}>
+                      ›
+                    </span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => openPanel("normalizationReport", { resetRange: true })}
-                    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
+                    className={`group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${
                       activePanel === "normalizationReport"
-                        ? "border-emerald-500 bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-sm shadow-emerald-200"
-                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-200 hover:bg-emerald-50"
+                        ? "border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 shadow-sm"
+                        : "border-slate-200 bg-white/80 hover:border-amber-200 hover:bg-amber-50/70"
                     }`}
                   >
-                    <span>
-                      <span className="block text-sm font-bold">일반/변심 정상화 리포트</span>
-                      <span className={`block text-xs ${activePanel === "normalizationReport" ? "text-emerald-100" : "text-slate-500"}`}>
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm ${
+                      activePanel === "normalizationReport"
+                        ? "bg-gradient-to-br from-amber-500 to-orange-500"
+                        : "bg-gradient-to-br from-orange-400 to-amber-400"
+                    }`}>
+                      <CheckCircle2 className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-black text-slate-900">일반/변심 정상화 리포트</span>
+                      <span className="block truncate text-xs font-medium text-slate-500">
                         일반 · 변심만 별도 집계
                       </span>
                     </span>
-                    <CheckCircle2 className="h-4 w-4" />
+                    <span className={`text-lg font-black transition ${activePanel === "normalizationReport" ? "text-amber-500" : "text-slate-300 group-hover:text-amber-400"}`}>
+                      ›
+                    </span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => openPanel("modelReport", { resetRange: true })}
-                    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
+                    className={`group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${
                       activePanel === "modelReport"
-                        ? "border-rose-500 bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-sm shadow-rose-200"
-                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-rose-200 hover:bg-rose-50"
+                        ? "border-rose-200 bg-gradient-to-r from-rose-50 to-pink-50 shadow-sm"
+                        : "border-slate-200 bg-white/80 hover:border-rose-200 hover:bg-rose-50/70"
                     }`}
                   >
-                    <span>
-                      <span className="block text-sm font-bold">모델별 불량 리포트</span>
-                      <span className={`block text-xs ${activePanel === "modelReport" ? "text-rose-100" : "text-slate-500"}`}>
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm ${
+                      activePanel === "modelReport"
+                        ? "bg-gradient-to-br from-rose-500 to-pink-500"
+                        : "bg-gradient-to-br from-rose-400 to-pink-400"
+                    }`}>
+                      <Smartphone className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-black text-slate-900">모델별 불량 리포트</span>
+                      <span className="block truncate text-xs font-medium text-slate-500">
                         전체 · 이번달 · 이번주 · 오늘
                       </span>
                     </span>
-                    <Smartphone className="h-4 w-4" />
+                    <span className={`text-lg font-black transition ${activePanel === "modelReport" ? "text-rose-500" : "text-slate-300 group-hover:text-rose-400"}`}>
+                      ›
+                    </span>
                   </button>
                 </div>
+
+                <div className="rounded-3xl border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-emerald-50 p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-black text-slate-900">사용량 관리</p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">
+                        Blob 접근을 아끼는 설정입니다.
+                      </p>
+                    </div>
+                    <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-500 text-white shadow-sm">
+                      <Database className="h-5 w-5" />
+                    </span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className="rounded-2xl bg-white/80 px-3 py-2 ring-1 ring-cyan-100">
+                      <p className="text-[11px] font-bold text-slate-400">사진 용량</p>
+                      <p className="mt-1 text-sm font-black text-cyan-700">{formatBytes(summary.totalPhotoSize)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-white/80 px-3 py-2 ring-1 ring-amber-100">
+                      <p className="text-[11px] font-bold text-slate-400">90일 초과</p>
+                      <p className="mt-1 text-sm font-black text-amber-600">{oldPhotoRecordCount}건</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
+                    <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700">사진 자동조회 OFF</span>
+                    <span className="rounded-full bg-blue-100 px-2.5 py-1 text-blue-700">조회 후 표시</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="group flex w-full items-center justify-between rounded-3xl border border-slate-200 bg-slate-50/90 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
+                >
+                  <span className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-amber-500 shadow-sm ring-1 ring-amber-100">
+                      <Sparkles className="h-5 w-5" />
+                    </span>
+                    <span>
+                      <span className="block text-sm font-black text-slate-900">운영 가이드</span>
+                      <span className="block text-xs font-medium text-slate-500">
+                        프로그램 사용 방법 및 운영 안내
+                      </span>
+                    </span>
+                  </span>
+                  <span className="text-lg font-black text-slate-300 group-hover:text-slate-500">›</span>
+                </button>
               </CardContent>
             </Card>
           </aside>

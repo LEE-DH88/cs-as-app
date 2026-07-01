@@ -3848,6 +3848,25 @@ export default function ReturnRecordApp() {
     }
   }
 
+  function handleDownloadSearchResultsExcel() {
+    if (!recordSearchSubmitted) {
+      setStatusError("먼저 조회 버튼을 눌러 기록을 조회해주세요.");
+      setStatusMessage("");
+      return;
+    }
+
+    if (displayedRecords.length === 0) {
+      setStatusError("조회 결과에 내려받을 기록이 없습니다.");
+      setStatusMessage("");
+      return;
+    }
+
+    const filename = `반품검사기록_조회결과_${formatExcelIssuedDateKey()}.xlsx`;
+    downloadExcel(filename, displayedRecords);
+    setStatusError("");
+    setStatusMessage(`조회 결과 엑셀 다운로드가 완료되었습니다. (${displayedRecords.length}건)`);
+  }
+
   function renderExcelDownloadButtons(buttonClassName = "rounded-2xl") {
     const ranges: ExcelDownloadRange[] = ["today", "week", "all"];
 
@@ -5282,15 +5301,24 @@ export default function ReturnRecordApp() {
                     날짜·제품·결과별로 조회하고, 필요한 기록을 바로 수정하거나 엑셀로 내려받습니다.
                   </p>
                   <p className="mt-1 text-xs leading-5 text-slate-400">
-                    엑셀은 오늘·이번주·전체 기록으로 나눠 내려받을 수 있습니다.
+                    조회한 결과만 엑셀로 내려받을 수 있습니다.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <span className="rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  <span className="min-w-[110px] whitespace-nowrap rounded-full bg-blue-50 px-4 py-2 text-center text-sm font-semibold text-blue-700">
                     {recordSearchSubmitted ? `조회 결과 ${displayedRecords.length}건` : "조회 전"}
                   </span>
-                  {renderExcelDownloadButtons("rounded-2xl")}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleDownloadSearchResultsExcel}
+                    disabled={!recordSearchSubmitted || displayedRecords.length === 0}
+                    className="whitespace-nowrap rounded-2xl"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    조회 내려받기
+                  </Button>
                 </div>
               </div>
 
@@ -5408,7 +5436,7 @@ export default function ReturnRecordApp() {
                 </label>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-sm text-slate-500">
+                  <span className="whitespace-nowrap text-sm text-slate-500">
                     {recordSearchSubmitted
                       ? `조회 ${displayedRecords.length}건 / 선택 ${selectedRecordIds.length}건`
                       : "조회 전"}

@@ -2033,6 +2033,32 @@ export default function ReturnRecordApp() {
     }
   }
 
+  function sortRecordsForDisplay(nextRecords: ReturnRecord[]) {
+    return [...nextRecords].sort((a, b) => {
+      const bTime = new Date(b.createdAt || "").getTime();
+      const aTime = new Date(a.createdAt || "").getTime();
+
+      if (Number.isNaN(bTime) || Number.isNaN(aTime)) return 0;
+      return bTime - aTime;
+    });
+  }
+
+  function upsertRecordInState(nextRecord: ReturnRecord) {
+    setRecords((prev) => {
+      const exists = prev.some((record) => record.id === nextRecord.id);
+      const nextRecords = exists
+        ? prev.map((record) => (record.id === nextRecord.id ? nextRecord : record))
+        : [nextRecord, ...prev];
+
+      return sortRecordsForDisplay(nextRecords);
+    });
+  }
+
+  function removeRecordsFromState(recordIds: string[]) {
+    const removeSet = new Set(recordIds);
+    setRecords((prev) => prev.filter((record) => !removeSet.has(record.id)));
+  }
+
   useEffect(() => {
     fetchRecords();
   }, []);
@@ -2720,10 +2746,12 @@ export default function ReturnRecordApp() {
       );
 
       setRecords((prev) =>
-        prev.map((record) =>
-          normalizeProductOptionText(record.productName || "") === currentOption
-            ? { ...record, productName: nextOption }
-            : record
+        sortRecordsForDisplay(
+          prev.map((record) =>
+            normalizeProductOptionText(record.productName || "") === currentOption
+              ? { ...record, productName: nextOption }
+              : record
+          )
         )
       );
 
@@ -2742,7 +2770,6 @@ export default function ReturnRecordApp() {
       );
 
       cancelEditProductOption();
-      await fetchRecords();
       setStatusMessage(
         recordsToRename.length > 0
           ? `제품명 '${currentOption}'을 '${nextOption}'로 수정했고, 기존 기록 ${recordsToRename.length}건도 함께 변경했습니다.`
@@ -3416,7 +3443,7 @@ export default function ReturnRecordApp() {
         throw new Error(data?.error || "기록 수정에 실패했습니다.");
       }
 
-      await fetchRecords();
+      upsertRecordInState(updatedRecord);
       setInlineEditingId(null);
       setInlineSavingId(null);
       setInlineEditDraft(null);
@@ -3493,7 +3520,7 @@ export default function ReturnRecordApp() {
         throw new Error(data?.error || "기록 저장에 실패했습니다.");
       }
 
-      await fetchRecords();
+      upsertRecordInState(newRecord);
       resetForm();
       setStatusMessage(
         isEditing
@@ -3543,7 +3570,7 @@ export default function ReturnRecordApp() {
       setStatusMessage("기록과 사진을 함께 삭제 중입니다...");
 
       await deleteRecordWithoutConfirm(record);
-      await fetchRecords();
+      removeRecordsFromState([record.id]);
       setSelectedRecordIds((prev) => prev.filter((id) => id !== record.id));
       setStatusMessage("기록과 연결 사진이 함께 삭제되었습니다.");
     } catch (error) {
@@ -3580,7 +3607,7 @@ export default function ReturnRecordApp() {
         await deleteRecordWithoutConfirm(record);
       }
 
-      await fetchRecords();
+      removeRecordsFromState(selectedRecords.map((record) => record.id));
       setSelectedRecordIds([]);
       setStatusMessage(`선택한 기록 ${selectedRecords.length}개가 삭제되었습니다.`);
     } catch (error) {
@@ -3658,7 +3685,7 @@ export default function ReturnRecordApp() {
         throw new Error(saveData?.error || "사진 삭제 기록 반영에 실패했습니다.");
       }
 
-      await fetchRecords();
+      upsertRecordInState(updatedRecord);
       setExpandedPhotoRecordIds((prev) => prev.filter((id) => id !== record.id));
       setStatusMessage("90일 초과 사진이 삭제되었고, 텍스트 기록은 유지되었습니다.");
     } catch (error) {

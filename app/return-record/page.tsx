@@ -2656,9 +2656,25 @@ export default function ReturnRecordApp() {
       return;
     }
 
+    const recordsToRename = records.filter(
+      (record) =>
+        normalizeProductOptionText(record.productName || "") === currentOption
+    );
+
+    const confirmed = window.confirm(
+      `'${currentOption}' 제품명을 '${nextOption}'로 수정할까요?\n기존 기록 ${recordsToRename.length}건도 같은 제품명으로 함께 변경됩니다.`
+    );
+
+    if (!confirmed) return;
+
     try {
       setSavingProductOption(true);
       setStatusError("");
+      setStatusMessage(
+        recordsToRename.length > 0
+          ? `제품명 목록과 기존 기록 ${recordsToRename.length}건을 함께 수정 중입니다...`
+          : "제품명 목록을 수정 중입니다..."
+      );
 
       const response = await fetch(PRODUCT_OPTIONS_API_PATH, {
         method: "PATCH",
@@ -2671,10 +2687,43 @@ export default function ReturnRecordApp() {
         throw new Error(data?.error || "제품명 수정에 실패했습니다.");
       }
 
+      for (const record of recordsToRename) {
+        const updatedRecord: ReturnRecord = {
+          ...record,
+          productName: nextOption,
+          invoicePhotos: record.invoicePhotos || [],
+          productPhotos: record.productPhotos || [],
+        };
+
+        const recordResponse = await fetch("/api/records", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(updatedRecord),
+        });
+
+        const recordData = await recordResponse.json();
+
+        if (!recordResponse.ok) {
+          throw new Error(
+            recordData?.error || "기존 기록 제품명 변경에 실패했습니다."
+          );
+        }
+      }
+
       applyProductOptionsResponse(
         data,
         customProductOptions.map((item) =>
           item === currentOption ? nextOption : item
+        )
+      );
+
+      setRecords((prev) =>
+        prev.map((record) =>
+          normalizeProductOptionText(record.productName || "") === currentOption
+            ? { ...record, productName: nextOption }
+            : record
         )
       );
 
@@ -2693,8 +2742,11 @@ export default function ReturnRecordApp() {
       );
 
       cancelEditProductOption();
+      await fetchRecords();
       setStatusMessage(
-        `제품명 '${currentOption}'을 '${nextOption}'로 수정했습니다. 기존 기록은 변경되지 않습니다.`
+        recordsToRename.length > 0
+          ? `제품명 '${currentOption}'을 '${nextOption}'로 수정했고, 기존 기록 ${recordsToRename.length}건도 함께 변경했습니다.`
+          : `제품명 '${currentOption}'을 '${nextOption}'로 수정했습니다.`
       );
     } catch (error) {
       setStatusMessage("");

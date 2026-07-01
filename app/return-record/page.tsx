@@ -641,6 +641,7 @@ const MAX_FILE_MB = 5;
 const JPEG_QUALITY = 0.72;
 const IMAGE_MAX_WIDTH = 1600;
 const IMAGE_MAX_HEIGHT = 1600;
+const PHOTO_VIEW_RETENTION_DAYS = 90;
 
 function formatDateTime(value: string) {
   const d = new Date(value);
@@ -751,6 +752,27 @@ function parseDateKeyToDate(dateKey: string) {
   if (!match) return null;
 
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function getRecordAgeDays(createdAt: string) {
+  const dateKey = getDateOnly(createdAt);
+  const recordDate = parseDateKeyToDate(dateKey);
+
+  if (!recordDate) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  recordDate.setHours(0, 0, 0, 0);
+
+  return Math.floor((today.getTime() - recordDate.getTime()) / 86400000);
+}
+
+function isPhotoRetentionExpired(createdAt: string) {
+  const ageDays = getRecordAgeDays(createdAt);
+
+  if (ageDays === null) return false;
+
+  return ageDays > PHOTO_VIEW_RETENTION_DAYS;
 }
 
 function addDaysToDateKey(dateKey: string, days: number) {
@@ -1885,6 +1907,8 @@ export default function ReturnRecordApp() {
   const [filterResult, setFilterResult] = useState<string>("전체");
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [expandedPhotoRecordIds, setExpandedPhotoRecordIds] = useState<string[]>([]);
+  const [cleaningPhotoRecordId, setCleaningPhotoRecordId] = useState<string | null>(null);
   const [reportRange, setReportRange] = useState<ReportRange>("all");
   const [activePanel, setActivePanel] = useState<ActivePanel>("form");
 
@@ -2255,6 +2279,16 @@ export default function ReturnRecordApp() {
       totalPhotoSize,
     };
   }, [records]);
+
+  const oldPhotoRecordCount = useMemo(() =>
+    records.filter((record) => {
+      const totalPhotos =
+        (record.invoicePhotos || []).length + (record.productPhotos || []).length;
+
+      return totalPhotos > 0 && isPhotoRetentionExpired(record.createdAt);
+    }).length,
+    [records]
+  );
 
   const reportDateKeys = useMemo(() => getCurrentReportDateKeys(), []);
 
@@ -3487,6 +3521,84 @@ export default function ReturnRecordApp() {
     }
   }
 
+  function toggleRecordPhotoButtons(recordId: string) {
+    setExpandedPhotoRecordIds((prev) =>
+      prev.includes(recordId)
+        ? prev.filter((id) => id !== recordId)
+        : [...prev, recordId]
+    );
+  }
+
+  async function handleDeleteOnlyRecordPhotos(record: ReturnRecord) {
+    const photoUrls = [
+      ...(record.invoicePhotos || []).map((photo) => photo.url),
+      ...(record.productPhotos || []).map((photo) => photo.url),
+    ].filter(Boolean);
+
+    if (photoUrls.length === 0) {
+      setStatusError("삭제할 사진이 없습니다.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `이 기록의 사진 ${photoUrls.length}장을 Blob에서 삭제하시겠습니까?\n텍스트 기록은 그대로 유지됩니다.\n별도 백업이 필요하면 삭제 전에 사진 링크를 먼저 보관해주세요.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setCleaningPhotoRecordId(record.id);
+      setStatusError("");
+      setStatusMessage("90일 초과 사진을 삭제 중입니다...");
+
+      const deleteResponse = await fetch("/api/delete-blob", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          urls: photoUrls,
+        }),
+      });
+
+      const deleteData = await deleteResponse.json();
+
+      if (!deleteResponse.ok) {
+        throw new Error(deleteData?.error || "사진 삭제에 실패했습니다.");
+      }
+
+      const updatedRecord: ReturnRecord = {
+        ...record,
+        invoicePhotos: [],
+        productPhotos: [],
+      };
+
+      const saveResponse = await fetch("/api/records", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updatedRecord),
+      });
+
+      const saveData = await saveResponse.json();
+
+      if (!saveResponse.ok) {
+        throw new Error(saveData?.error || "사진 삭제 기록 반영에 실패했습니다.");
+      }
+
+      await fetchRecords();
+      setExpandedPhotoRecordIds((prev) => prev.filter((id) => id !== record.id));
+      setStatusMessage("90일 초과 사진이 삭제되었고, 텍스트 기록은 유지되었습니다.");
+    } catch (error) {
+      setStatusError(
+        error instanceof Error ? error.message : "사진 정리 중 오류가 발생했습니다."
+      );
+    } finally {
+      setCleaningPhotoRecordId(null);
+    }
+  }
+
 
   function handleDownloadExcel() {
     if (filteredRecords.length === 0) {
@@ -3783,6 +3895,9 @@ export default function ReturnRecordApp() {
                         <p className="text-xs font-semibold text-slate-400">사진 사용량</p>
                         <p className="mt-1 text-xl font-bold">
                           {formatBytes(summary.totalPhotoSize)}
+                        </p>
+                        <p className="mt-1 text-xs text-amber-300">
+                          90일 초과 사진 보유 기록 {oldPhotoRecordCount}건
                         </p>
                       </div>
                       <Database className="h-7 w-7 text-slate-600" />
@@ -5519,81 +5634,156 @@ export default function ReturnRecordApp() {
                           </>
                         )}
 
-                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                          <div>
-                            <p className="mb-2 font-medium">송장 사진</p>
-                            {record.invoicePhotos.length === 0 ? (
-                              <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
-                                등록된 사진이 없습니다.
-                              </div>
-                            ) : (
-                              <div className="grid gap-3 sm:grid-cols-2">
-                                {record.invoicePhotos.map((photo, index) => (
-                                  <div
-                                    key={photo.url}
-                                    className="rounded-2xl border bg-white p-3 text-sm"
-                                  >
-                                    <p className="font-semibold text-slate-700">
-                                      송장사진 {index + 1}
-                                    </p>
-                                    <p className="mt-1 truncate font-medium">
-                                      {photo.filename}
-                                    </p>
-                                    <p className="text-slate-500">
-                                      {formatBytes(photo.size)}
-                                    </p>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="mt-3 w-full rounded-xl"
-                                      onClick={() => openPhotoInNewTab(photo)}
-                                    >
-                                      사진 보기
-                                    </Button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                        {(() => {
+                          const invoicePhotoList = record.invoicePhotos || [];
+                          const productPhotoList = record.productPhotos || [];
+                          const totalPhotoCount =
+                            invoicePhotoList.length + productPhotoList.length;
+                          const ageDays = getRecordAgeDays(record.createdAt);
+                          const isExpired = isPhotoRetentionExpired(record.createdAt);
+                          const isExpanded = expandedPhotoRecordIds.includes(record.id);
 
-                          <div>
-                            <p className="mb-2 font-medium">제품 사진</p>
-                            {record.productPhotos.length === 0 ? (
-                              <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">
+                          if (totalPhotoCount === 0) {
+                            return (
+                              <div className="mt-4 rounded-2xl border border-dashed p-4 text-sm text-slate-500">
                                 등록된 사진이 없습니다.
                               </div>
-                            ) : (
-                              <div className="grid gap-3 sm:grid-cols-2">
-                                {record.productPhotos.map((photo, index) => (
-                                  <div
-                                    key={photo.url}
-                                    className="rounded-2xl border bg-white p-3 text-sm"
-                                  >
-                                    <p className="font-semibold text-slate-700">
-                                      제품사진 {index + 1}
+                            );
+                          }
+
+                          if (isExpired) {
+                            return (
+                              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                  <div>
+                                    <p className="font-bold">90일 초과 사진 정리 대상</p>
+                                    <p className="mt-1 leading-6">
+                                      등록 후 {ageDays ?? "90일 초과"}일 경과한 기록입니다.
+                                      Blob 단순 연산 절감을 위해 사진 보기 버튼은 숨김 처리했습니다.
+                                      필요 시 별도 백업 후 사진만 삭제하세요.
                                     </p>
-                                    <p className="mt-1 truncate font-medium">
-                                      {photo.filename}
+                                    <p className="mt-1 text-xs">
+                                      보유 사진: 송장 {invoicePhotoList.length}장 / 제품 {productPhotoList.length}장
                                     </p>
-                                    <p className="text-slate-500">
-                                      {formatBytes(photo.size)}
-                                    </p>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="mt-3 w-full rounded-xl"
-                                      onClick={() => openPhotoInNewTab(photo)}
-                                    >
-                                      사진 보기
-                                    </Button>
                                   </div>
-                                ))}
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="rounded-xl border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+                                    onClick={() => handleDeleteOnlyRecordPhotos(record)}
+                                    disabled={cleaningPhotoRecordId === record.id}
+                                  >
+                                    {cleaningPhotoRecordId === record.id ? "삭제 중" : "사진만 삭제"}
+                                  </Button>
+                                </div>
                               </div>
-                            )}
-                          </div>
-                        </div>
+                            );
+                          }
+
+                          return (
+                            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                <div>
+                                  <p className="font-bold text-slate-800">사진 보관 중</p>
+                                  <p className="mt-1 text-sm text-slate-600">
+                                    최근 90일 이내 기록입니다. 사진 버튼은 접힘 처리되어 필요할 때만 열 수 있습니다.
+                                  </p>
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    경과일: {ageDays ?? "확인 불가"}일 / 송장 {invoicePhotoList.length}장 / 제품 {productPhotoList.length}장
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-xl bg-white"
+                                  onClick={() => toggleRecordPhotoButtons(record.id)}
+                                >
+                                  {isExpanded ? "사진 버튼 닫기" : "사진 보기 버튼 열기"}
+                                </Button>
+                              </div>
+
+                              {isExpanded && (
+                                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                                  <div>
+                                    <p className="mb-2 font-medium">송장 사진</p>
+                                    {invoicePhotoList.length === 0 ? (
+                                      <div className="rounded-2xl border border-dashed bg-white p-4 text-sm text-slate-500">
+                                        등록된 송장 사진이 없습니다.
+                                      </div>
+                                    ) : (
+                                      <div className="grid gap-3 sm:grid-cols-2">
+                                        {invoicePhotoList.map((photo, index) => (
+                                          <div
+                                            key={photo.url}
+                                            className="rounded-2xl border bg-white p-3 text-sm"
+                                          >
+                                            <p className="font-semibold text-slate-700">
+                                              송장사진 {index + 1}
+                                            </p>
+                                            <p className="mt-1 truncate font-medium">
+                                              {photo.filename}
+                                            </p>
+                                            <p className="text-slate-500">
+                                              {formatBytes(photo.size)}
+                                            </p>
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
+                                              className="mt-3 w-full rounded-xl"
+                                              onClick={() => openPhotoInNewTab(photo)}
+                                            >
+                                              사진 보기
+                                            </Button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div>
+                                    <p className="mb-2 font-medium">제품 사진</p>
+                                    {productPhotoList.length === 0 ? (
+                                      <div className="rounded-2xl border border-dashed bg-white p-4 text-sm text-slate-500">
+                                        등록된 제품 사진이 없습니다.
+                                      </div>
+                                    ) : (
+                                      <div className="grid gap-3 sm:grid-cols-2">
+                                        {productPhotoList.map((photo, index) => (
+                                          <div
+                                            key={photo.url}
+                                            className="rounded-2xl border bg-white p-3 text-sm"
+                                          >
+                                            <p className="font-semibold text-slate-700">
+                                              제품사진 {index + 1}
+                                            </p>
+                                            <p className="mt-1 truncate font-medium">
+                                              {photo.filename}
+                                            </p>
+                                            <p className="text-slate-500">
+                                              {formatBytes(photo.size)}
+                                            </p>
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
+                                              className="mt-3 w-full rounded-xl"
+                                              onClick={() => openPhotoInNewTab(photo)}
+                                            >
+                                              사진 보기
+                                            </Button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </CardContent>
                     </Card>
                   );

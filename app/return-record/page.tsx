@@ -202,10 +202,27 @@ const PRODUCT_TYPES: ProductSelectValue[] = [
 const PROCESS_ACTIONS: ProcessAction[] = [
   "미선택",
   "안성물류이동",
-  "안성물류폐기이동",
   "자체폐기",
   "자체 B급활용",
+  "안성물류폐기이동",
 ];
+
+function getProcessActionDisplayName(value?: ProcessAction | string) {
+  if (!value) return "미선택";
+  if (value === "자체 B급활용") return "원자재화";
+  if (value === "안성물류폐기이동") return "안성폐기";
+  return value;
+}
+
+function normalizeProcessActionValue(value?: ProcessAction | string): ProcessAction {
+  if (!value) return "미선택";
+  if (value === "원자재화") return "자체 B급활용";
+  if (value === "안성폐기") return "안성물류폐기이동";
+  if (PROCESS_ACTIONS.includes(value as ProcessAction)) {
+    return value as ProcessAction;
+  }
+  return "미선택";
+}
 
 const RESULT_TYPES: InspectionResult[] = [
   "검사 대기",
@@ -585,7 +602,7 @@ function getProcessActionsByInspectionResult(value: InspectionResult): ProcessAc
   }
 
   if (isDefectiveInspectionResult(value)) {
-    return ["안성물류폐기이동", "자체폐기", "자체 B급활용"];
+    return ["자체폐기", "자체 B급활용", "안성물류폐기이동"];
   }
 
   return PROCESS_ACTIONS;
@@ -596,9 +613,10 @@ function getDefaultProcessActionByInspectionResult(
   currentProcessAction: ProcessAction
 ): ProcessAction {
   const availableProcessActions = getProcessActionsByInspectionResult(value);
+  const normalizedCurrentProcessAction = normalizeProcessActionValue(currentProcessAction);
 
-  if (availableProcessActions.includes(currentProcessAction)) {
-    return currentProcessAction;
+  if (availableProcessActions.includes(normalizedCurrentProcessAction)) {
+    return normalizedCurrentProcessAction;
   }
 
   if (isNormalInspectionResult(value)) {
@@ -606,7 +624,7 @@ function getDefaultProcessActionByInspectionResult(
   }
 
   if (isDefectiveInspectionResult(value)) {
-    return "안성물류폐기이동";
+    return "자체폐기";
   }
 
   return "미선택";
@@ -1668,7 +1686,7 @@ function downloadExcel(filename: string, records: ReturnRecord[]) {
     record.returnType || "",
     record.productName || "",
     record.inspectionResult || "",
-    record.processAction || "미선택",
+    getProcessActionDisplayName(record.processAction),
     record.note || "",
     record.invoicePhotos[0]?.url ? "송장사진1 보기" : "",
     record.invoicePhotos[1]?.url ? "송장사진2 보기" : "",
@@ -2404,6 +2422,7 @@ export default function ReturnRecordApp() {
           record.productName,
           record.inspectionResult,
           record.processAction || "미선택",
+          getProcessActionDisplayName(record.processAction),
           record.note,
         ]
           .join(" ")
@@ -3266,7 +3285,7 @@ export default function ReturnRecordApp() {
       customProductName: isKnownProduct ? "" : record.productName || "",
       processAction: getDefaultProcessActionByInspectionResult(
         normalizedResult,
-        record.processAction || "미선택"
+        normalizeProcessActionValue(record.processAction || "미선택")
       ),
       inspectionResult: normalizedResult,
       note: record.note || "",
@@ -4671,7 +4690,7 @@ export default function ReturnRecordApp() {
                       {getProcessActionsByInspectionResult(inspectionResult).map(
                         (item) => (
                           <SelectItem key={item} value={item}>
-                            {item}
+                            {getProcessActionDisplayName(item)}
                           </SelectItem>
                         )
                       )}
@@ -5225,9 +5244,11 @@ export default function ReturnRecordApp() {
                                   : record.inspectionResult}
                               </span>
                               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                                {isInlineEditing
-                                  ? inlineEditDraft.processAction
-                                  : record.processAction || "미선택"}
+                                {getProcessActionDisplayName(
+                                  isInlineEditing
+                                    ? inlineEditDraft.processAction
+                                    : record.processAction || "미선택"
+                                )}
                               </span>
                             </div>
                             <p className="mt-3 text-sm text-slate-500">
@@ -5518,7 +5539,7 @@ export default function ReturnRecordApp() {
                                       inlineEditDraft.inspectionResult
                                     ).map((item) => (
                                       <SelectItem key={item} value={item}>
-                                        {item}
+                                        {getProcessActionDisplayName(item)}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>
@@ -5612,7 +5633,7 @@ export default function ReturnRecordApp() {
                               <div className="rounded-2xl bg-slate-50 p-4">
                                 <p className="text-xs text-slate-500">이동/처리</p>
                                 <p className="mt-1 font-medium">
-                                  {record.processAction || "미선택"}
+                                  {getProcessActionDisplayName(record.processAction)}
                                 </p>
                               </div>
 

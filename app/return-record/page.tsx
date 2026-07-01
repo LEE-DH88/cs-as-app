@@ -18,6 +18,9 @@ import {
   Clock3,
   Smartphone,
   Database,
+  Bell,
+  Sparkles,
+  PackageCheck,
 } from "lucide-react";
 
 import * as XLSX from "xlsx";
@@ -3910,24 +3913,31 @@ export default function ReturnRecordApp() {
 
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-[1500px] p-4 md:p-8">
-        <div className="mb-6 rounded-3xl border bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-                반품 검사/수리 기록 프로그램
-              </h1>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                대상: 모든 가전류 / 일반반품 · 변심반품 · 불량반품 · 불량교환 · AS · 검수
-              </p>
-              <p className="mt-1 text-sm leading-6 text-slate-500">
-                기록은 서버에 저장되므로 PC와 휴대폰에서 동일하게 조회됩니다.
+    <div className="min-h-screen bg-[radial-gradient(circle_at_12%_8%,rgba(45,212,191,0.18),transparent_30%),radial-gradient(circle_at_86%_4%,rgba(244,114,182,0.20),transparent_28%),linear-gradient(135deg,#f8fafc_0%,#eefdf8_40%,#fff7ed_100%)] text-slate-900">
+      <div className="mx-auto max-w-[1700px] p-4 md:p-8">
+        <div className="mb-6 overflow-hidden rounded-[2rem] border border-white/80 bg-white/80 shadow-[0_24px_70px_rgba(15,23,42,0.12)] backdrop-blur">
+          <div className="flex flex-col gap-5 p-5 md:p-6 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="text-4xl font-black tracking-[0.16em] text-slate-900 md:text-5xl">
+                  GGUMBI
+                </p>
+                <span className="rounded-full bg-cyan-50 px-4 py-2 text-sm font-bold text-cyan-700 ring-1 ring-cyan-100">
+                  엄마의 마음으로, 아이의 행복을 만듭니다.
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                AS · 반품 · 검수 · 정상화 기록을 한 곳에서 관리합니다.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={fetchRecords} disabled={loadingRecords}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={fetchRecords}
+                disabled={loadingRecords}
+                className="rounded-2xl border-white/70 bg-white/85 shadow-sm hover:bg-white"
+              >
                 {loadingRecords ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
@@ -3936,12 +3946,59 @@ export default function ReturnRecordApp() {
                 새로고침
               </Button>
 
-              {renderExcelDownloadButtons("rounded-2xl")}
+              {renderExcelDownloadButtons("rounded-2xl border-white/70 bg-white/85 shadow-sm hover:bg-white")}
+
+              <div className="hidden items-center gap-3 rounded-2xl border border-white/70 bg-white/75 px-4 py-2 text-sm font-bold text-slate-700 shadow-sm xl:flex">
+                <Bell className="h-4 w-4 text-slate-500" />
+                <User className="h-4 w-4 text-slate-500" />
+                관리자님
+              </div>
+            </div>
+          </div>
+
+          <div className="relative overflow-hidden border-t border-white/70 bg-gradient-to-r from-white via-cyan-50/70 to-rose-50/80 px-5 py-6 md:px-8 md:py-8">
+            <div className="absolute -right-10 top-2 h-40 w-40 rounded-full bg-cyan-200/35 blur-3xl" />
+            <div className="absolute right-28 -top-8 h-32 w-32 rounded-full bg-amber-200/35 blur-3xl" />
+            <div className="absolute bottom-0 right-10 hidden h-28 w-48 rotate-[-8deg] rounded-[2rem] bg-white/55 shadow-sm ring-1 ring-white/60 lg:block" />
+            <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
+              <div>
+                <p className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  서버 저장 · PC/모바일 동기화 · 사용량 최적화 적용
+                </p>
+                <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
+                  <span className="text-cyan-600">GGUMBI</span> 반품 검사/수리 기록 프로그램
+                </h1>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  대상: 모든 가전류 / 일반반품 · 변심반품 · 불량반품 · 불량교환 · AS · 검수
+                </p>
+                <div className="mt-4 max-w-3xl rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm font-semibold text-emerald-800">
+                  기록은 서버에 저장되므로 PC와 휴대폰에서 동일하게 조회됩니다.
+                </div>
+              </div>
+
+              <div className="relative hidden lg:block">
+                <div className="rounded-[2rem] border border-white/80 bg-white/70 p-5 shadow-[0_20px_45px_rgba(15,23,42,0.10)] backdrop-blur">
+                  <div className="flex items-center justify-between">
+                    <div className="rounded-2xl bg-cyan-500/10 p-3 text-cyan-700">
+                      <PackageCheck className="h-8 w-8" />
+                    </div>
+                    <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-bold text-orange-700">
+                      빠른 기록
+                    </span>
+                  </div>
+                  <p className="mt-4 text-sm font-bold text-slate-500">오늘의 업무</p>
+                  <p className="mt-1 text-2xl font-black text-slate-950">조회 · 수정 · 내려받기</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    사진은 버튼 클릭 시에만 열어 Blob 사용량을 아낍니다.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
 
           {(statusMessage || statusError) && (
-            <div className="mt-4 space-y-2">
+            <div className="space-y-2 px-5 pb-5 md:px-8">
               {statusMessage && (
                 <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
                   {statusMessage}
@@ -3958,13 +4015,22 @@ export default function ReturnRecordApp() {
 
         <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="lg:sticky lg:top-6 lg:self-start">
-            <Card className="overflow-hidden rounded-[2rem] border-slate-200 bg-white shadow-sm">
+            <Card className="overflow-hidden rounded-[2rem] border-white/70 bg-white/85 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur">
               <CardContent className="space-y-4 p-4">
-                <div className="rounded-3xl bg-slate-950 p-5 text-white">
-                  <h2 className="mt-2 text-xl font-bold">업무 대시보드</h2>
-                  <p className="mt-2 text-xs leading-5 text-slate-400">
-                    등록 · 조회 · 현황 · 리포트만 빠르게 이동합니다.
-                  </p>
+                <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 p-5 text-white shadow-sm">
+                  <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-cyan-300/20 blur-2xl" />
+                  <div className="relative flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-black tracking-[0.22em] text-cyan-200">GGUMBI TOOL</p>
+                      <h2 className="mt-2 text-xl font-bold">업무 대시보드</h2>
+                      <p className="mt-2 text-xs leading-5 text-slate-300">
+                        등록 · 조회 · 현황 · 리포트만 빠르게 이동합니다.
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-white/12 p-3 text-cyan-100 ring-1 ring-white/10">
+                      <ClipboardList className="h-8 w-8" />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -3976,8 +4042,8 @@ export default function ReturnRecordApp() {
                     onClick={() => openPanel("form")}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "form"
-                        ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-emerald-50"
+                        ? "border-emerald-500 bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-sm shadow-emerald-200"
+                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-200 hover:bg-emerald-50"
                     }`}
                   >
                     <span>
@@ -3994,8 +4060,8 @@ export default function ReturnRecordApp() {
                     onClick={() => openPanel("records")}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "records"
-                        ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-blue-50"
+                        ? "border-blue-500 bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-sm shadow-blue-200"
+                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-blue-200 hover:bg-blue-50"
                     }`}
                   >
                     <span>
@@ -4012,8 +4078,8 @@ export default function ReturnRecordApp() {
                     onClick={() => openPanel("dashboard", { resetRange: true })}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "dashboard"
-                        ? "border-slate-900 bg-slate-900 text-white shadow-sm"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        ? "border-violet-500 bg-gradient-to-r from-violet-600 to-indigo-500 text-white shadow-sm shadow-violet-200"
+                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-violet-200 hover:bg-violet-50"
                     }`}
                   >
                     <span>
@@ -4030,8 +4096,8 @@ export default function ReturnRecordApp() {
                     onClick={() => openPanel("normalizationReport", { resetRange: true })}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "normalizationReport"
-                        ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-emerald-50"
+                        ? "border-emerald-500 bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-sm shadow-emerald-200"
+                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-200 hover:bg-emerald-50"
                     }`}
                   >
                     <span>
@@ -4048,8 +4114,8 @@ export default function ReturnRecordApp() {
                     onClick={() => openPanel("modelReport", { resetRange: true })}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
                       activePanel === "modelReport"
-                        ? "border-rose-600 bg-rose-600 text-white shadow-sm"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-rose-50"
+                        ? "border-rose-500 bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-sm shadow-rose-200"
+                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-rose-200 hover:bg-rose-50"
                     }`}
                   >
                     <span>
@@ -4434,7 +4500,7 @@ export default function ReturnRecordApp() {
                           className={`rounded-2xl border px-4 py-2 text-left transition ${
                             reportRange === option.value
                               ? "border-emerald-600 bg-emerald-600 text-white"
-                              : "border-slate-200 bg-white text-slate-700 hover:bg-emerald-50"
+                              : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-200 hover:bg-emerald-50"
                           }`}
                         >
                           <span className="block text-sm font-bold">{option.label}</span>
@@ -4616,7 +4682,7 @@ export default function ReturnRecordApp() {
                         className={`rounded-2xl border px-4 py-2 text-left transition ${
                           reportRange === option.value
                             ? "border-rose-600 bg-rose-600 text-white"
-                            : "border-slate-200 bg-white text-slate-700 hover:bg-rose-50"
+                            : "border-slate-200 bg-white/80 text-slate-700 hover:border-rose-200 hover:bg-rose-50"
                         }`}
                       >
                         <span className="block text-sm font-bold">{option.label}</span>

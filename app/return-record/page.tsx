@@ -3915,48 +3915,43 @@ export default function ReturnRecordApp() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_12%_8%,rgba(45,212,191,0.18),transparent_30%),radial-gradient(circle_at_86%_4%,rgba(244,114,182,0.20),transparent_28%),linear-gradient(135deg,#f8fafc_0%,#eefdf8_40%,#fff7ed_100%)] text-slate-900">
       <div className="mx-auto max-w-[1700px] p-4 md:p-8">
-        <div className="mb-6 overflow-hidden rounded-[2rem] border border-white/80 bg-white/80 shadow-[0_24px_70px_rgba(15,23,42,0.12)] backdrop-blur">
-          <div className="flex flex-col gap-5 p-5 md:p-6 xl:flex-row xl:items-center xl:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-3">
-                <p className="text-4xl font-black tracking-[0.16em] text-slate-900 md:text-5xl">
-                  GGUMBI
-                </p>
-                <span className="rounded-full bg-cyan-50 px-4 py-2 text-sm font-bold text-cyan-700 ring-1 ring-cyan-100">
-                  엄마의 마음으로, 아이의 행복을 만듭니다.
-                </span>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                AS · 반품 · 검수 · 정상화 기록을 한 곳에서 관리합니다.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={fetchRecords}
-                disabled={loadingRecords}
-                className="rounded-2xl border-white/70 bg-white/85 shadow-sm hover:bg-white"
-              >
-                {loadingRecords ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                )}
-                새로고침
-              </Button>
-
-              {renderExcelDownloadButtons("rounded-2xl border-white/70 bg-white/85 shadow-sm hover:bg-white")}
-
-              <div className="hidden items-center gap-3 rounded-2xl border border-white/70 bg-white/75 px-4 py-2 text-sm font-bold text-slate-700 shadow-sm xl:flex">
-                <Bell className="h-4 w-4 text-slate-500" />
-                <User className="h-4 w-4 text-slate-500" />
-                관리자님
-              </div>
-            </div>
+        <header className="mb-5 flex flex-col gap-4 px-1 py-2 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap items-center gap-4">
+            <p className="text-3xl font-black tracking-[0.18em] text-slate-950 md:text-4xl">
+              GGUMBI
+            </p>
+            <span className="text-sm font-black text-cyan-700">
+              엄마의 마음으로, 아이의 행복을 만듭니다.
+            </span>
           </div>
 
-          <div className="relative overflow-hidden border-t border-white/70 bg-gradient-to-r from-white via-cyan-50/70 to-rose-50/80 px-5 py-6 md:px-8 md:py-8">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={fetchRecords}
+              disabled={loadingRecords}
+              className="rounded-2xl border-white/80 bg-white/85 shadow-sm hover:bg-white"
+            >
+              {loadingRecords ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              새로고침
+            </Button>
+
+            {renderExcelDownloadButtons("rounded-2xl border-white/80 bg-white/85 shadow-sm hover:bg-white")}
+
+            <div className="hidden items-center gap-3 rounded-2xl border border-white/70 bg-white/75 px-4 py-2 text-sm font-bold text-slate-700 shadow-sm lg:flex">
+              <Bell className="h-4 w-4 text-slate-500" />
+              <User className="h-4 w-4 text-slate-500" />
+              관리자님
+            </div>
+          </div>
+        </header>
+
+        <div className="mb-6 overflow-hidden rounded-[2rem] border border-white/80 bg-white/80 shadow-[0_24px_70px_rgba(15,23,42,0.12)] backdrop-blur">
+          <div className="relative overflow-hidden bg-gradient-to-r from-white via-cyan-50/70 to-rose-50/80 px-5 py-6 md:px-8 md:py-8">
             <div className="absolute -right-10 top-2 h-40 w-40 rounded-full bg-cyan-200/35 blur-3xl" />
             <div className="absolute right-28 -top-8 h-32 w-32 rounded-full bg-amber-200/35 blur-3xl" />
             <div className="absolute bottom-0 right-10 hidden h-28 w-48 rotate-[-8deg] rounded-[2rem] bg-white/55 shadow-sm ring-1 ring-white/60 lg:block" />

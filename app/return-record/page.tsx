@@ -1923,6 +1923,7 @@ export default function ReturnRecordApp() {
   const [searchEndDate, setSearchEndDate] = useState("");
   const [filterProduct, setFilterProduct] = useState<string>("전체");
   const [filterResult, setFilterResult] = useState<string>("전체");
+  const [recordSearchSubmitted, setRecordSearchSubmitted] = useState(false);
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [expandedPhotoRecordIds, setExpandedPhotoRecordIds] = useState<string[]>([]);
@@ -2489,16 +2490,37 @@ export default function ReturnRecordApp() {
     filterResult,
   ]);
 
+  const displayedRecords = useMemo(() => {
+    return recordSearchSubmitted ? filteredRecords : [];
+  }, [recordSearchSubmitted, filteredRecords]);
+
+  function handleSearchRecords() {
+    setRecordSearchSubmitted(true);
+    setSelectedRecordIds([]);
+    setExpandedPhotoRecordIds([]);
+  }
+
+  function handleResetRecordSearch() {
+    setSearchStartDate("");
+    setSearchEndDate("");
+    setSearchTerm("");
+    setFilterProduct("전체");
+    setFilterResult("전체");
+    setRecordSearchSubmitted(false);
+    setSelectedRecordIds([]);
+    setExpandedPhotoRecordIds([]);
+  }
+
   useEffect(() => {
-    const visibleIds = new Set(filteredRecords.map((record) => record.id));
+    const visibleIds = new Set(displayedRecords.map((record) => record.id));
     setSelectedRecordIds((prev) =>
       prev.filter((recordId) => visibleIds.has(recordId))
     );
-  }, [filteredRecords]);
+  }, [displayedRecords]);
 
   const isAllFilteredRecordsSelected =
-    filteredRecords.length > 0 &&
-    filteredRecords.every((record) => selectedRecordIds.includes(record.id));
+    displayedRecords.length > 0 &&
+    displayedRecords.every((record) => selectedRecordIds.includes(record.id));
 
   function toggleSelectAllFilteredRecords() {
     if (isAllFilteredRecordsSelected) {
@@ -2506,7 +2528,7 @@ export default function ReturnRecordApp() {
       return;
     }
 
-    setSelectedRecordIds(filteredRecords.map((record) => record.id));
+    setSelectedRecordIds(displayedRecords.map((record) => record.id));
   }
 
   function toggleSelectRecord(recordId: string) {
@@ -3589,7 +3611,7 @@ export default function ReturnRecordApp() {
       return;
     }
 
-    const selectedRecords = filteredRecords.filter((record) =>
+    const selectedRecords = displayedRecords.filter((record) =>
       selectedRecordIds.includes(record.id)
     );
 
@@ -3699,7 +3721,13 @@ export default function ReturnRecordApp() {
 
 
   function handleDownloadExcel() {
-    if (filteredRecords.length === 0) {
+    if (!recordSearchSubmitted) {
+      setStatusError("먼저 조회 버튼을 눌러 기록을 불러온 뒤 엑셀을 내려받아주세요.");
+      setStatusMessage("");
+      return;
+    }
+
+    if (displayedRecords.length === 0) {
       setStatusError("내려받을 기록이 없습니다.");
       setStatusMessage("");
       return;
@@ -3713,7 +3741,7 @@ export default function ReturnRecordApp() {
       today.getMonth() + 1
     ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.xlsx`;
 
-    downloadExcel(filename, filteredRecords);
+    downloadExcel(filename, displayedRecords);
   }
 
 
@@ -5125,7 +5153,7 @@ export default function ReturnRecordApp() {
 
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
-                    조회 결과 {filteredRecords.length}건
+                    {recordSearchSubmitted ? `조회 결과 ${displayedRecords.length}건` : "조회 전"}
                   </span>
                   <Button variant="outline" onClick={handleDownloadExcel} className="rounded-2xl">
                     <Download className="mr-2 h-4 w-4" />
@@ -5207,18 +5235,20 @@ export default function ReturnRecordApp() {
                 <div className="flex items-end gap-2">
                   <Button
                     type="button"
+                    className="rounded-2xl"
+                    onClick={handleSearchRecords}
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    조회
+                  </Button>
+
+                  <Button
+                    type="button"
                     variant="outline"
                     className="rounded-2xl bg-white"
-                    onClick={() => {
-                      setSearchStartDate("");
-                      setSearchEndDate("");
-                      setSearchTerm("");
-                      setFilterProduct("전체");
-                      setFilterResult("전체");
-                      setSelectedRecordIds([]);
-                    }}
+                    onClick={handleResetRecordSearch}
                   >
-                    전체
+                    초기화
                   </Button>
 
                   <Button
@@ -5239,7 +5269,7 @@ export default function ReturnRecordApp() {
                     type="checkbox"
                     checked={isAllFilteredRecordsSelected}
                     onChange={toggleSelectAllFilteredRecords}
-                    disabled={filteredRecords.length === 0 || bulkDeleting}
+                    disabled={!recordSearchSubmitted || displayedRecords.length === 0 || bulkDeleting}
                     className="h-4 w-4 rounded border-slate-300"
                   />
                   조회 결과 전체선택
@@ -5247,7 +5277,9 @@ export default function ReturnRecordApp() {
 
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="text-sm text-slate-500">
-                    조회 {filteredRecords.length}건 / 선택 {selectedRecordIds.length}건
+                    {recordSearchSubmitted
+                      ? `조회 ${displayedRecords.length}건 / 선택 ${selectedRecordIds.length}건`
+                      : "조회 전"}
                   </span>
 
                   <Button
@@ -5273,18 +5305,25 @@ export default function ReturnRecordApp() {
               </div>
             </div>
 
-            {loadingRecords ? (
+            {!recordSearchSubmitted ? (
+              <div className="rounded-3xl border border-dashed border-blue-200 bg-blue-50/40 p-10 text-center text-slate-600">
+                <p className="text-base font-semibold text-slate-800">조회 조건을 입력한 뒤 조회 버튼을 눌러주세요.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  기록보기 화면에서는 처음부터 전체 기록을 펼치지 않아 화면 렌더링 부담을 줄입니다.
+                </p>
+              </div>
+            ) : loadingRecords ? (
               <div className="flex items-center justify-center rounded-3xl border border-dashed p-10 text-slate-500">
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                 기록 불러오는 중...
               </div>
-            ) : filteredRecords.length === 0 ? (
+            ) : displayedRecords.length === 0 ? (
               <div className="rounded-3xl border border-dashed p-10 text-center text-slate-500">
-                아직 등록된 기록이 없어요.
+                조회 조건에 맞는 기록이 없습니다.
               </div>
             ) : (
               <div className="grid gap-4">
-                {filteredRecords.map((record) => {
+                {displayedRecords.map((record) => {
                   const isInlineEditing =
                     inlineEditingId === record.id && inlineEditDraft;
 

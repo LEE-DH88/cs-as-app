@@ -1982,6 +1982,7 @@ export default function ReturnRecordApp() {
   const [loadingProductOptions, setLoadingProductOptions] = useState(false);
   const [savingProductOption, setSavingProductOption] = useState(false);
   const [productManagerOpen, setProductManagerOpen] = useState(false);
+  const [operationGuideOpen, setOperationGuideOpen] = useState(false);
   const [editingProductOption, setEditingProductOption] = useState<string | null>(null);
   const [editingProductOptionValue, setEditingProductOptionValue] = useState("");
 
@@ -4223,6 +4224,7 @@ export default function ReturnRecordApp() {
 
                 <button
                   type="button"
+                  onClick={() => setOperationGuideOpen(true)}
                   className="group flex w-full items-center justify-between rounded-3xl border border-slate-200 bg-slate-50/90 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
                 >
                   <span className="flex items-center gap-3">
@@ -6303,6 +6305,78 @@ export default function ReturnRecordApp() {
             )}
           </main>
         </div>
+
+        {operationGuideOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+            <div className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-[2rem] border border-slate-200 bg-white p-6 shadow-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-black text-cyan-600">GGUMBI TOOL GUIDE</p>
+                  <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950">운영 가이드</h2>
+                  <p className="mt-2 text-sm font-medium text-slate-500">
+                    반품 검사/수리 기록을 안정적으로 운영하기 위한 핵심 기준입니다.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  onClick={() => setOperationGuideOpen(false)}
+                >
+                  닫기
+                </Button>
+              </div>
+
+              <div className="mt-6 grid gap-3 md:grid-cols-2">
+                <div className="rounded-3xl border border-emerald-100 bg-emerald-50/70 p-4">
+                  <p className="text-sm font-black text-emerald-800">등록 기준</p>
+                  <ul className="mt-3 space-y-2 text-sm font-medium text-slate-700">
+                    <li>• 사진은 필요한 경우에만 업로드합니다.</li>
+                    <li>• 검사결과 선택 후 이동/처리를 확인합니다.</li>
+                    <li>• 비고는 선택 문구와 직접 입력을 함께 사용할 수 있습니다.</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-3xl border border-blue-100 bg-blue-50/70 p-4">
+                  <p className="text-sm font-black text-blue-800">기록 조회</p>
+                  <ul className="mt-3 space-y-2 text-sm font-medium text-slate-700">
+                    <li>• 기록보기는 조회 버튼을 눌렀을 때만 목록이 표시됩니다.</li>
+                    <li>• 조회 내려받기는 현재 조회 결과만 엑셀로 저장합니다.</li>
+                    <li>• 사진은 보기 버튼을 눌렀을 때만 열립니다.</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-3xl border border-amber-100 bg-amber-50/70 p-4">
+                  <p className="text-sm font-black text-amber-800">사진 관리</p>
+                  <ul className="mt-3 space-y-2 text-sm font-medium text-slate-700">
+                    <li>• 최근 90일 사진은 접힘 상태로 관리합니다.</li>
+                    <li>• 90일 초과 사진은 삭제 또는 별도 백업 대상입니다.</li>
+                    <li>• Blob 사용량 절감을 위해 자동 미리보기는 사용하지 않습니다.</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-3xl border border-rose-100 bg-rose-50/70 p-4">
+                  <p className="text-sm font-black text-rose-800">삭제 주의</p>
+                  <ul className="mt-3 space-y-2 text-sm font-medium text-slate-700">
+                    <li>• 기록 삭제 시 연결된 사진도 함께 삭제될 수 있습니다.</li>
+                    <li>• 사진만 삭제하면 텍스트 기록은 유지됩니다.</li>
+                    <li>• 삭제 전 필요한 증빙은 먼저 백업합니다.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-black text-slate-900">Vercel 사용량 절감 원칙</p>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
+                  <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">사진 자동조회 OFF</span>
+                  <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">조회 후 표시</span>
+                  <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">엑셀은 조회 결과만</span>
+                  <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">90일 초과 사진 정리</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {productManagerOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">

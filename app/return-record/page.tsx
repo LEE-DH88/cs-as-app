@@ -1993,6 +1993,7 @@ export default function ReturnRecordApp() {
   const [searchEndDate, setSearchEndDate] = useState("");
   const [filterProduct, setFilterProduct] = useState<string>("전체");
   const [filterResult, setFilterResult] = useState<string>("전체");
+  const [filterProcessAction, setFilterProcessAction] = useState<string>("전체");
   const [recordSearchSubmitted, setRecordSearchSubmitted] = useState(false);
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -2544,12 +2545,19 @@ export default function ReturnRecordApp() {
         (filterResult === "불량판정" &&
           isDefectiveInspectionResult(record.inspectionResult));
 
+      const matchesProcessAction =
+        filterProcessAction === "전체" ||
+        normalizeProcessActionValue(record.processAction || "미선택") ===
+          normalizeProcessActionValue(filterProcessAction) ||
+        getProcessActionDisplayName(record.processAction) === filterProcessAction;
+
       return (
         matchesSearch &&
         matchesStartDate &&
         matchesEndDate &&
         matchesProduct &&
-        matchesResult
+        matchesResult &&
+        matchesProcessAction
       );
     });
   }, [
@@ -2559,6 +2567,7 @@ export default function ReturnRecordApp() {
     searchEndDate,
     filterProduct,
     filterResult,
+    filterProcessAction,
   ]);
 
   const displayedRecords = useMemo(() => {
@@ -2577,6 +2586,7 @@ export default function ReturnRecordApp() {
     setSearchTerm("");
     setFilterProduct("전체");
     setFilterResult("전체");
+    setFilterProcessAction("전체");
     setRecordSearchSubmitted(false);
     setSelectedRecordIds([]);
     setExpandedPhotoRecordIds([]);
@@ -3901,7 +3911,7 @@ export default function ReturnRecordApp() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-7xl p-4 md:p-8">
+      <div className="mx-auto max-w-[1500px] p-4 md:p-8">
         <div className="mb-6 rounded-3xl border bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -5324,102 +5334,123 @@ export default function ReturnRecordApp() {
 
               <CardContent className="space-y-5 pt-6">
             <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-4">
-              <div className="grid gap-3 md:grid-cols-[0.9fr_0.9fr_1.5fr_0.8fr_0.8fr_auto]">
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-slate-500">조회 시작일</Label>
-                  <Input
-                    type="date"
-                    value={searchStartDate}
-                    onChange={(e) => setSearchStartDate(e.target.value)}
-                    className="rounded-2xl bg-white"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-slate-500">조회 종료일</Label>
-                  <Input
-                    type="date"
-                    value={searchEndDate}
-                    onChange={(e) => setSearchEndDate(e.target.value)}
-                    className="rounded-2xl bg-white"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-slate-500">통합 검색</Label>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <div className="space-y-3">
+                <div className="grid gap-3 xl:grid-cols-[0.9fr_0.9fr_minmax(420px,2.2fr)_auto]">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-500">조회 시작일</Label>
                     <Input
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="송장번호, 주문번호, 고객명, 제품명, 비고 검색"
-                      className="rounded-2xl bg-white pl-9"
+                      type="date"
+                      value={searchStartDate}
+                      onChange={(e) => setSearchStartDate(e.target.value)}
+                      className="rounded-2xl bg-white"
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-500">조회 종료일</Label>
+                    <Input
+                      type="date"
+                      value={searchEndDate}
+                      onChange={(e) => setSearchEndDate(e.target.value)}
+                      className="rounded-2xl bg-white"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-500">통합 검색</Label>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="송장번호, 주문번호, 고객명, 제품명, 비고 검색"
+                        className="rounded-2xl bg-white pl-9"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-end gap-2">
+                    <Button
+                      type="button"
+                      className="rounded-2xl"
+                      onClick={handleSearchRecords}
+                    >
+                      <Search className="mr-2 h-4 w-4" />
+                      조회
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-2xl bg-white"
+                      onClick={handleResetRecordSearch}
+                    >
+                      초기화
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-2xl bg-white"
+                      onClick={fetchRecords}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      새로고침
+                    </Button>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-slate-500">제품</Label>
-                  <Select value={filterProduct} onValueChange={setFilterProduct}>
-                    <SelectTrigger className="rounded-2xl bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="전체">전체 제품</SelectItem>
-                      {productFilterOptions.map((item) => (
-                        <SelectItem key={item} value={item}>
-                          {item}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-500">제품</Label>
+                    <Select value={filterProduct} onValueChange={setFilterProduct}>
+                      <SelectTrigger className="rounded-2xl bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="전체">전체 제품</SelectItem>
+                        {productFilterOptions.map((item) => (
+                          <SelectItem key={item} value={item}>
+                            {item}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-slate-500">결과</Label>
-                  <Select value={filterResult} onValueChange={setFilterResult}>
-                    <SelectTrigger className="rounded-2xl bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="전체">전체 결과</SelectItem>
-                      {RESULT_TYPES.map((item) => (
-                        <SelectItem key={item} value={item}>
-                          {item}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-500">결과</Label>
+                    <Select value={filterResult} onValueChange={setFilterResult}>
+                      <SelectTrigger className="rounded-2xl bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="전체">전체 결과</SelectItem>
+                        {RESULT_TYPES.map((item) => (
+                          <SelectItem key={item} value={item}>
+                            {item}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                <div className="flex items-end gap-2">
-                  <Button
-                    type="button"
-                    className="rounded-2xl"
-                    onClick={handleSearchRecords}
-                  >
-                    <Search className="mr-2 h-4 w-4" />
-                    조회
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-2xl bg-white"
-                    onClick={handleResetRecordSearch}
-                  >
-                    초기화
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-2xl bg-white"
-                    onClick={fetchRecords}
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    새로고침
-                  </Button>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-500">이동/처리</Label>
+                    <Select value={filterProcessAction} onValueChange={setFilterProcessAction}>
+                      <SelectTrigger className="rounded-2xl bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="전체">전체 처리</SelectItem>
+                        <SelectItem value="미선택">미선택</SelectItem>
+                        <SelectItem value="안성물류이동">안성물류이동</SelectItem>
+                        <SelectItem value="자체폐기">자체폐기</SelectItem>
+                        <SelectItem value="원자재화">원자재화</SelectItem>
+                        <SelectItem value="안성폐기">안성폐기</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
 

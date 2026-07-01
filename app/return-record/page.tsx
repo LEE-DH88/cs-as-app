@@ -107,6 +107,7 @@ type OcrParsedResult = {
 };
 
 type ReportRange = "all" | "month" | "week" | "today";
+type ExcelDownloadRange = "today" | "week" | "all";
 type ActivePanel = "dashboard" | "normalizationReport" | "modelReport" | "records" | "form";
 
 type ReportDateKeys = {
@@ -725,6 +726,75 @@ function getCurrentReportDateKeys(): ReportDateKeys {
     weekStartKey: dateToDateKey(weekStart),
     weekEndKey: dateToDateKey(weekEnd),
   };
+}
+
+type ExcelDownloadRangeInfo = {
+  range: ExcelDownloadRange;
+  label: string;
+  shortLabel: string;
+  filenameLabel: string;
+  startKey?: string;
+  endKey?: string;
+};
+
+function getExcelDownloadRangeInfo(
+  range: ExcelDownloadRange,
+  keys: ReportDateKeys
+): ExcelDownloadRangeInfo {
+  if (range === "today") {
+    return {
+      range,
+      label: "오늘 기록",
+      shortLabel: "오늘",
+      filenameLabel: `오늘_${keys.todayKey.replaceAll("-", "")}`,
+      startKey: keys.todayKey,
+      endKey: keys.todayKey,
+    };
+  }
+
+  if (range === "week") {
+    return {
+      range,
+      label: "이번주 기록",
+      shortLabel: "이번주",
+      filenameLabel: `이번주_${keys.weekStartKey.replaceAll("-", "")}_${keys.weekEndKey.replaceAll("-", "")}`,
+      startKey: keys.weekStartKey,
+      endKey: keys.weekEndKey,
+    };
+  }
+
+  return {
+    range,
+    label: "전체 기록",
+    shortLabel: "전체",
+    filenameLabel: "전체",
+  };
+}
+
+function filterRecordsForExcelDownload(
+  records: ReturnRecord[],
+  rangeInfo: ExcelDownloadRangeInfo
+) {
+  if (!rangeInfo.startKey || !rangeInfo.endKey) {
+    return records;
+  }
+
+  return records.filter((record) => {
+    const recordDate = getDateOnly(record.createdAt);
+    return (
+      recordDate &&
+      recordDate >= rangeInfo.startKey! &&
+      recordDate <= rangeInfo.endKey!
+    );
+  });
+}
+
+function formatExcelIssuedDateKey() {
+  const today = new Date();
+  return `${today.getFullYear()}${String(today.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}${String(today.getDate()).padStart(2, "0")}`;
 }
 
 function formatDateKeyKo(dateKey: string) {
@@ -1926,6 +1996,7 @@ export default function ReturnRecordApp() {
   const [recordSearchSubmitted, setRecordSearchSubmitted] = useState(false);
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [downloadingExcelRange, setDownloadingExcelRange] = useState<ExcelDownloadRange | null>(null);
   const [expandedPhotoRecordIds, setExpandedPhotoRecordIds] = useState<string[]>([]);
   const [cleaningPhotoRecordId, setCleaningPhotoRecordId] = useState<string | null>(null);
   const [reportRange, setReportRange] = useState<ReportRange>("all");
@@ -3720,28 +3791,92 @@ export default function ReturnRecordApp() {
   }
 
 
-  function handleDownloadExcel() {
-    if (!recordSearchSubmitted) {
-      setStatusError("먼저 조회 버튼을 눌러 기록을 불러온 뒤 엑셀을 내려받아주세요.");
-      setStatusMessage("");
-      return;
+  async function fetchRecordsForExcelDownload(rangeInfo: ExcelDownloadRangeInfo) {
+    const params = new URLSearchParams();
+    params.set("downloadRange", rangeInfo.range);
+
+    if (rangeInfo.startKey && rangeInfo.endKey) {
+      params.set("startDate", rangeInfo.startKey);
+      params.set("endDate", rangeInfo.endKey);
     }
 
-    if (displayedRecords.length === 0) {
-      setStatusError("내려받을 기록이 없습니다.");
-      setStatusMessage("");
-      return;
+    const queryString = params.toString();
+    const response = await fetch(`/api/records?${queryString}`, {
+      cache: "no-store",
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data?.error || `${rangeInfo.label} 조회에 실패했습니다.`);
     }
 
-    setStatusError("");
-    setStatusMessage("엑셀 파일을 내려받는 중입니다.");
+    const nextRecords = Array.isArray(data.records) ? data.records : [];
 
-    const today = new Date();
-    const filename = `반품검사기록_${today.getFullYear()}${String(
-      today.getMonth() + 1
-    ).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}.xlsx`;
+    // /api/records가 날짜 쿼리를 지원하지 않는 경우에도 엑셀에는 요청한 범위만 들어가도록 한 번 더 필터링합니다.
+    return sortRecordsForDisplay(filterRecordsForExcelDownload(nextRecords, rangeInfo));
+  }
 
-    downloadExcel(filename, displayedRecords);
+  async function handleDownloadExcel(range: ExcelDownloadRange) {
+    if (downloadingExcelRange) return;
+
+    const rangeInfo = getExcelDownloadRangeInfo(range, reportDateKeys);
+
+    try {
+      setDownloadingExcelRange(range);
+      setStatusError("");
+      setStatusMessage(`${rangeInfo.label} 엑셀 파일을 내려받는 중입니다.`);
+
+      const recordsForDownload = await fetchRecordsForExcelDownload(rangeInfo);
+
+      if (recordsForDownload.length === 0) {
+        setStatusError(`${rangeInfo.label}에 내려받을 기록이 없습니다.`);
+        setStatusMessage("");
+        return;
+      }
+
+      const filename = `반품검사기록_${rangeInfo.filenameLabel}_${formatExcelIssuedDateKey()}.xlsx`;
+
+      downloadExcel(filename, recordsForDownload);
+      setStatusMessage(`${rangeInfo.label} 엑셀 다운로드가 완료되었습니다. (${recordsForDownload.length}건)`);
+    } catch (error) {
+      setStatusError(
+        error instanceof Error ? error.message : "엑셀 다운로드 중 오류가 발생했습니다."
+      );
+      setStatusMessage("");
+    } finally {
+      setDownloadingExcelRange(null);
+    }
+  }
+
+  function renderExcelDownloadButtons(buttonClassName = "rounded-2xl") {
+    const ranges: ExcelDownloadRange[] = ["today", "week", "all"];
+
+    return (
+      <div className="flex flex-wrap gap-2">
+        {ranges.map((range) => {
+          const rangeInfo = getExcelDownloadRangeInfo(range, reportDateKeys);
+          const isLoading = downloadingExcelRange === range;
+
+          return (
+            <Button
+              key={range}
+              type="button"
+              variant="outline"
+              onClick={() => handleDownloadExcel(range)}
+              disabled={Boolean(downloadingExcelRange)}
+              className={buttonClassName}
+            >
+              {isLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              {rangeInfo.shortLabel} 엑셀
+            </Button>
+          );
+        })}
+      </div>
+    );
   }
 
 
@@ -3772,10 +3907,7 @@ export default function ReturnRecordApp() {
                 새로고침
               </Button>
 
-              <Button variant="outline" onClick={handleDownloadExcel}>
-                <Download className="mr-2 h-4 w-4" />
-                엑셀 내려받기
-              </Button>
+              {renderExcelDownloadButtons("rounded-2xl")}
             </div>
           </div>
 
@@ -5149,16 +5281,16 @@ export default function ReturnRecordApp() {
                   <p className="mt-2 text-sm leading-6 text-slate-500">
                     날짜·제품·결과별로 조회하고, 필요한 기록을 바로 수정하거나 엑셀로 내려받습니다.
                   </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                    엑셀은 오늘·이번주·전체 기록으로 나눠 내려받을 수 있습니다.
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
                     {recordSearchSubmitted ? `조회 결과 ${displayedRecords.length}건` : "조회 전"}
                   </span>
-                  <Button variant="outline" onClick={handleDownloadExcel} className="rounded-2xl">
-                    <Download className="mr-2 h-4 w-4" />
-                    엑셀
-                  </Button>
+                  {renderExcelDownloadButtons("rounded-2xl")}
                 </div>
               </div>
 

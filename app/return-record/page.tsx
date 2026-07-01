@@ -3977,22 +3977,47 @@ export default function ReturnRecordApp() {
                 </div>
               </div>
 
-              <div className="relative hidden lg:block">
-                <div className="rounded-[2rem] border border-white/80 bg-white/70 p-5 shadow-[0_20px_45px_rgba(15,23,42,0.10)] backdrop-blur">
-                  <div className="flex items-center justify-between">
-                    <div className="rounded-2xl bg-cyan-500/10 p-3 text-cyan-700">
-                      <PackageCheck className="h-8 w-8" />
-                    </div>
-                    <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-bold text-orange-700">
-                      빠른 기록
-                    </span>
-                  </div>
-                  <p className="mt-4 text-sm font-bold text-slate-500">오늘의 업무</p>
-                  <p className="mt-1 text-2xl font-black text-slate-950">조회 · 수정 · 내려받기</p>
-                  <p className="mt-2 text-xs leading-5 text-slate-500">
-                    사진은 버튼 클릭 시에만 열어 Blob 사용량을 아낍니다.
-                  </p>
+              <div className="relative hidden min-h-[190px] lg:block">
+                <div className="absolute -right-4 top-0 h-44 w-44 rounded-full bg-gradient-to-br from-cyan-200/60 to-blue-200/30 blur-2xl" />
+                <div className="absolute right-24 bottom-4 h-24 w-24 rounded-full bg-gradient-to-br from-emerald-200/50 to-teal-100/30 blur-xl" />
+                <div className="absolute right-2 top-2 h-[174px] w-[330px] rounded-[2rem] border border-white/80 bg-gradient-to-br from-sky-50/90 via-white/75 to-emerald-50/90 shadow-[0_22px_50px_rgba(15,23,42,0.10)] backdrop-blur" />
+
+                <div className="absolute right-48 bottom-8 h-12 w-16 rotate-[-10deg] rounded-xl bg-teal-200/80 shadow-sm ring-1 ring-teal-300/40">
+                  <div className="absolute left-3 top-3 h-6 w-10 rounded-lg border-2 border-teal-500/45" />
+                  <div className="absolute left-6 -top-3 h-6 w-4 rounded-t-md bg-teal-300/80" />
                 </div>
+
+                <div className="absolute right-16 bottom-7 h-20 w-16 rounded-b-2xl rounded-t-md bg-emerald-100/90 shadow-sm ring-1 ring-emerald-200">
+                  <div className="absolute left-7 -top-8 h-10 w-1.5 rounded-full bg-emerald-400/70" />
+                  <div className="absolute left-2 -top-7 h-9 w-8 rotate-[-22deg] rounded-full bg-emerald-300/75" />
+                  <div className="absolute right-0 -top-6 h-8 w-8 rotate-[24deg] rounded-full bg-teal-300/75" />
+                  <div className="absolute left-3 top-5 h-2 w-10 rounded-full bg-emerald-300/70" />
+                </div>
+
+                <div className="absolute right-[118px] top-0 h-[150px] w-[116px] rotate-[3deg] rounded-[1.6rem] border border-cyan-200/70 bg-white/95 p-4 shadow-[0_18px_35px_rgba(8,145,178,0.18)]">
+                  <div className="absolute left-1/2 top-[-16px] h-9 w-14 -translate-x-1/2 rounded-b-2xl rounded-t-xl bg-slate-300/80 ring-1 ring-slate-400/30">
+                    <div className="mx-auto mt-2 h-3 w-3 rounded-full border-2 border-white" />
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {[0, 1, 2].map((item) => (
+                      <div key={item} className="flex items-center gap-2">
+                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        </div>
+                        <div className="h-2 flex-1 rounded-full bg-slate-200" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-5 rounded-xl bg-gradient-to-r from-cyan-100 to-emerald-100 px-3 py-2 text-center text-xs font-black text-cyan-700">
+                    GGUMBI
+                  </div>
+                </div>
+
+                <div className="absolute right-[282px] top-7 rounded-full bg-white/80 px-3 py-1 text-xs font-black text-cyan-700 shadow-sm ring-1 ring-cyan-100">
+                  AS · 반품 · 검수
+                </div>
+                <Sparkles className="absolute right-72 bottom-8 h-5 w-5 text-amber-300" />
+                <Sparkles className="absolute right-8 top-10 h-4 w-4 text-cyan-300" />
               </div>
             </div>
           </div>

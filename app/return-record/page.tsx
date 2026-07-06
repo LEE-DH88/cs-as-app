@@ -160,6 +160,7 @@ type WeeklyTrendPoint = {
 type ComboChartRow = {
   id: string;
   label: string;
+  tooltipLabel?: string;
   total: number;
   normal: number;
   defective: number;
@@ -1058,6 +1059,61 @@ function getChartLabelLines(label: string) {
   return [normalized.slice(0, 9), normalized.length > 18 ? `${normalized.slice(9, 17)}…` : normalized.slice(9)];
 }
 
+function getCompactProductChartLabel(productName?: string) {
+  const normalized = normalizeReportProductName(productName || "");
+  const compact = normalized.replace(/\s+/g, "");
+  const upperCompact = compact.toUpperCase();
+
+  if (!compact || normalized === "제품명 미입력") return "제품명 미입력";
+  if (compact.includes("분리형")) return "분리형 포트";
+  if (compact === "휴대용분유포트") return "휴대용 포트";
+  if (upperCompact.includes("LED") && compact.includes("분유쉐이커")) return "LED쉐이커";
+  if (compact === "분유쉐이커") return "일반 쉐이커";
+  if (compact.includes("젖병살균세척기") || compact.includes("젖병세척기")) return "세척기";
+  if (compact.includes("듀얼팬") || compact.includes("쿨시트")) return "듀얼팬 쿨시트";
+  if (compact.includes("쿨링커버") || compact.includes("아기띠쿨링")) return "쿨링커버";
+  if (compact.includes("홈카메라")) return "홈카메라";
+
+  const withoutBrand = normalized
+    .replace(/\[?꿈비\]?/g, "")
+    .replace(/GUMBI/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!withoutBrand) return normalized;
+  if (withoutBrand.length <= 8) return withoutBrand;
+
+  return `${withoutBrand.slice(0, 8)}…`;
+}
+
+function compactNormalizationProductChartRows(rows: ModelInspectionRow[]) {
+  const sortedRows = [...rows].sort(
+    (a, b) => b.total - a.total || a.productName.localeCompare(b.productName, "ko-KR")
+  );
+  const topRows = sortedRows.slice(0, 10).map((row) => ({
+    id: row.productName,
+    label: getCompactProductChartLabel(row.productName),
+    tooltipLabel: row.productName,
+    total: row.total,
+    normal: row.normal,
+    defective: row.defective,
+  }));
+  const otherRows = sortedRows.slice(10);
+
+  if (otherRows.length === 0) return topRows;
+
+  topRows.push({
+    id: "normalization-products-other",
+    label: "기타",
+    tooltipLabel: `기타 ${otherRows.length}개 제품`,
+    total: otherRows.reduce((sum, row) => sum + row.total, 0),
+    normal: otherRows.reduce((sum, row) => sum + row.normal, 0),
+    defective: otherRows.reduce((sum, row) => sum + row.defective, 0),
+  });
+
+  return topRows;
+}
+
 function ComboBarRateChart({
   rows,
   emptyText,
@@ -1077,8 +1133,8 @@ function ComboBarRateChart({
     );
   }
 
-  const width = 860;
-  const padding = { top: 58, right: 64, bottom: 72, left: 52 };
+  const width = Math.max(860, visibleRows.length * 104 + 128);
+  const padding = { top: 58, right: 64, bottom: 78, left: 52 };
   const chartHeight = height;
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = chartHeight - padding.top - padding.bottom;
@@ -1133,13 +1189,14 @@ function ComboBarRateChart({
         </div>
       </div>
 
-      <svg
-        className="w-full overflow-visible"
-        style={{ height: chartHeight }}
-        viewBox={`0 0 ${width} ${chartHeight}`}
-        role="img"
-        aria-label="입고 추이 막대 그래프"
-      >
+      <div className="overflow-x-auto pb-2">
+        <svg
+          className="overflow-visible"
+          style={{ width, height: chartHeight }}
+          viewBox={`0 0 ${width} ${chartHeight}`}
+          role="img"
+          aria-label="입고 추이 막대 그래프"
+        >
         {yGuides.map((guide) => {
           const y = getCountY(guide);
 
@@ -1237,7 +1294,7 @@ function ComboBarRateChart({
                   </tspan>
                 ))}
               </text>
-              <title>{`${row.label} · 전체 ${row.total}건 · 정상 ${row.normal}건 · 불량 ${row.defective}건`}</title>
+              <title>{`${row.tooltipLabel || row.label} · 전체 ${row.total}건 · 정상 ${row.normal}건 · 불량 ${row.defective}건`}</title>
             </g>
           );
         })}
@@ -1293,7 +1350,8 @@ function ComboBarRateChart({
             </g>
           );
         })}
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -2452,13 +2510,9 @@ export default function ReturnRecordApp() {
 
   const normalizationProductChartRows = useMemo<ComboChartRow[]>(
     () =>
-      selectedNormalizationReportSummary.modelInspectionRows.map((row) => ({
-        id: row.productName,
-        label: row.productName,
-        total: row.total,
-        normal: row.normal,
-        defective: row.defective,
-      })),
+      compactNormalizationProductChartRows(
+        selectedNormalizationReportSummary.modelInspectionRows
+      ),
     [selectedNormalizationReportSummary.modelInspectionRows]
   );
 

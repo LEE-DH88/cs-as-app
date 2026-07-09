@@ -89,6 +89,24 @@ function normalizeCustomerNameCandidate(name: string) {
     .replace(/^[^가-힣]+|[^가-힣*]+$/g, "");
 }
 
+function restoreMissingCustomerMask(name: string, context?: string) {
+  const normalizedName = normalizeCustomerNameCandidate(name);
+
+  if (!normalizedName || normalizedName.includes("*")) return normalizedName;
+
+  const chars = Array.from(normalizedName);
+  const isTwoVisibleLetters = chars.length === 2 && /^[가-힣]{2}$/.test(normalizedName);
+  const contextText = cleanInvoiceText(context || "");
+  const isCjReturnSenderArea =
+    /보내는분|보낸분|보내는\s*분|발송인|발신인|고객명|050\d|010\d|050-\d|010-\d|반품|링크맘|엄감|대한통운|CJ/i.test(contextText);
+
+  if (isTwoVisibleLetters && isCjReturnSenderArea) {
+    return `${chars[0]}*${chars[1]}`;
+  }
+
+  return normalizedName;
+}
+
 function isValidCustomerNameCandidate(name: string) {
   const normalizedName = normalizeCustomerNameCandidate(name);
   const unmaskedName = normalizedName.replace(/\*/g, "");
@@ -134,12 +152,36 @@ function extractMaskedCustomerName(rawText: string) {
   for (const pattern of patterns) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(raw)) !== null) {
-      const name = normalizeCustomerNameCandidate(match[1]);
+      const matchStart = Math.max(0, match.index - 45);
+      const matchEnd = Math.min(raw.length, match.index + match[0].length + 45);
+      const context = raw.slice(matchStart, matchEnd);
+      const name = restoreMissingCustomerMask(match[1], context);
       if (isValidCustomerNameCandidate(name)) return name;
     }
   }
 
-  return "";
+  const namePattern = /[가-힣](?:\s*\*?\s*[가-힣]){1,3}/g;
+  let nameMatch: RegExpExecArray | null;
+  const candidates: { value: string; score: number }[] = [];
+
+  while ((nameMatch = namePattern.exec(raw)) !== null) {
+    const start = Math.max(0, nameMatch.index - 35);
+    const end = Math.min(raw.length, nameMatch.index + nameMatch[0].length + 35);
+    const context = raw.slice(start, end);
+    const value = restoreMissingCustomerMask(nameMatch[0], context);
+    if (!isValidCustomerNameCandidate(value)) continue;
+
+    let score = 0;
+    if (/보내는분|보낸분|발송인|발신인|고객명/i.test(context)) score += 120;
+    if (/050\d|010\d|050-\d|010-\d/i.test(context)) score += 55;
+    if (value.includes("*")) score += 80;
+    if (/받는분|안성시|고삼면|하남사이|하산국|대한통운|링크맘|엄감|주식회사|꿈비/i.test(context)) score -= 90;
+
+    candidates.push({ value, score });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.score > 0 ? candidates[0].value : "";
 }
 
 function extractReturnType(rawText: string) {
@@ -184,8 +226,16 @@ function extractProductText(rawText: string) {
   lines.forEach((line, index) => {
     if (/품\s*명|제품명|상품명|모델명/i.test(line)) {
       const afterLabel = line.replace(/^.*?(품\s*명|제품명|상품명|모델명)\s*[:：]?\s*/i, "");
+      const nextLine = lines[index + 1] || "";
+      const looksLikeProductContinuation =
+        nextLine.length > 0 &&
+        nextLine.length <= 45 &&
+        !/운송장번호|송장번호|접수일자|받는분|보내는분|분류코드|세부주소|권운송장번호|전화|010|050|1644|1588|대한통운|하남시|안성시/i.test(nextLine);
+
+      if (looksLikeProductContinuation) {
+        pushCandidate(`${afterLabel} ${nextLine}`);
+      }
       pushCandidate(afterLabel);
-      pushCandidate(`${afterLabel} ${lines[index + 1] || ""}`);
     }
 
     if (/링크맘|엄감|일반반품|변심반품|불량반품|불량교환|검수|P\s*[O0]\s*20/i.test(line)) {

@@ -3068,17 +3068,6 @@ export default function ReturnRecordApp() {
             "품명",
             "제품명",
             "주문번호",
-            "베이지",
-            "아이보리",
-            "화이트",
-            "블랙",
-            "그레이",
-            "핑크",
-            "민트",
-            "BLUE",
-            "PINK",
-            "WHITE",
-            "BLACK",
           ].includes(token)
       );
   }
@@ -3137,6 +3126,35 @@ export default function ReturnRecordApp() {
       if (sourceCompact.includes(key) && optionCompact.includes(key)) score += 90;
       if (sourceCompact.includes(key) && !optionCompact.includes(key)) score -= 12;
     });
+
+    const colorKeywords = [
+      "베이지",
+      "아이보리",
+      "화이트",
+      "블랙",
+      "그레이",
+      "핑크",
+      "민트",
+      "블루",
+      "브라운",
+      "네이비",
+    ];
+    const sourceColors = colorKeywords.filter((color) => sourceCompact.includes(compactProductMatchText(color)));
+    const optionColors = colorKeywords.filter((color) => optionCompact.includes(compactProductMatchText(color)));
+
+    sourceColors.forEach((color) => {
+      const key = compactProductMatchText(color);
+      if (optionCompact.includes(key)) score += 260;
+      if (optionColors.length > 0 && !optionCompact.includes(key)) score -= 220;
+    });
+
+    if (sourceCompact.includes("베이지") && optionCompact.includes("아이스패밀리")) {
+      score -= 260;
+    }
+
+    if (sourceCompact.includes("아이스패밀리") && optionCompact.includes("베이지")) {
+      score -= 220;
+    }
 
     if (sourceCompact.includes("LED") && !optionCompact.includes("LED") && /쉐이커|세이커/.test(optionCompact)) {
       score -= 180;
@@ -3385,6 +3403,24 @@ export default function ReturnRecordApp() {
       .replace(/^[^가-힣]+|[^가-힣*]+$/g, "");
   }
 
+  function restoreMissingCustomerMask(name: string, context?: string) {
+    const normalizedName = normalizeCustomerNameCandidate(name);
+
+    if (!normalizedName || normalizedName.includes("*")) return normalizedName;
+
+    const chars = Array.from(normalizedName);
+    const isTwoVisibleLetters = chars.length === 2 && /^[가-힣]{2}$/.test(normalizedName);
+    const contextText = cleanOcrText(context || "");
+    const isCjReturnSenderArea =
+      /보내는분|보낸분|보내는\s*분|발송인|발신인|고객명|050\d|010\d|050-\d|010-\d|반품|링크맘|엄감|대한통운|CJ/i.test(contextText);
+
+    if (isTwoVisibleLetters && isCjReturnSenderArea) {
+      return `${chars[0]}*${chars[1]}`;
+    }
+
+    return normalizedName;
+  }
+
   function isValidCustomerNameCandidate(name: string) {
     const normalizedName = normalizeCustomerNameCandidate(name);
     const unmaskedName = normalizedName.replace(/\*/g, "");
@@ -3437,7 +3473,10 @@ export default function ReturnRecordApp() {
     for (const pattern of senderPatterns) {
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(raw)) !== null) {
-        const name = normalizeCustomerNameCandidate(match[1]);
+        const matchStart = Math.max(0, match.index - 45);
+        const matchEnd = Math.min(raw.length, match.index + match[0].length + 45);
+        const context = raw.slice(matchStart, matchEnd);
+        const name = restoreMissingCustomerMask(match[1], context);
         if (isValidCustomerNameCandidate(name)) return name;
       }
     }
@@ -3447,12 +3486,11 @@ export default function ReturnRecordApp() {
     let match: RegExpExecArray | null;
 
     while ((match = namePattern.exec(raw)) !== null) {
-      const value = normalizeCustomerNameCandidate(match[0]);
-      if (!isValidCustomerNameCandidate(value)) continue;
-
       const start = Math.max(0, match.index - 35);
       const end = Math.min(raw.length, match.index + match[0].length + 35);
       const context = raw.slice(start, end);
+      const value = restoreMissingCustomerMask(match[0], context);
+      if (!isValidCustomerNameCandidate(value)) continue;
 
       let score = 0;
       if (/보내는분|보낸분|발송인|발신인|고객명/i.test(context)) score += 120;
@@ -3500,8 +3538,16 @@ export default function ReturnRecordApp() {
     lines.forEach((line, index) => {
       if (/품\s*명|제품명|상품명|모델명/i.test(line)) {
         const afterLabel = line.replace(/^.*?(품\s*명|제품명|상품명|모델명)\s*[:：]?\s*/i, "");
+        const nextLine = lines[index + 1] || "";
+        const looksLikeProductContinuation =
+          nextLine.length > 0 &&
+          nextLine.length <= 45 &&
+          !/운송장번호|송장번호|접수일자|받는분|보내는분|분류코드|세부주소|권운송장번호|전화|010|050|1644|1588|대한통운|하남시|안성시/i.test(nextLine);
+
+        if (looksLikeProductContinuation) {
+          pushCandidate(`${afterLabel} ${nextLine}`);
+        }
         pushCandidate(afterLabel);
-        pushCandidate(`${afterLabel} ${lines[index + 1] || ""}`);
       }
 
       if (/링크맘|엄감|일반반품|변심반품|불량반품|불량교환|검수|P\s*[O0]\s*20/i.test(line)) {

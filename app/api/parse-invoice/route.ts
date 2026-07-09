@@ -41,6 +41,16 @@ function cleanInvoiceText(text?: string) {
     .trim();
 }
 
+function normalizeProductOcrAliases(value?: string) {
+  return (value || "")
+    .normalize("NFKC")
+    .replace(/빼\s*이?\s*자/g, "베이지")
+    .replace(/베\s*이?\s*자/g, "베이지")
+    .replace(/배\s*이?\s*지/g, "베이지")
+    .replace(/배\s*이?\s*자/g, "베이지")
+    .replace(/베\s*이?\s*지/g, "베이지");
+}
+
 function cleanOrderNumberCandidate(candidate: string) {
   const normalized = (candidate || "")
     .normalize("NFKC")
@@ -97,8 +107,11 @@ function restoreMissingCustomerMask(name: string, context?: string) {
   const chars = Array.from(normalizedName);
   const isTwoVisibleLetters = chars.length === 2 && /^[가-힣]{2}$/.test(normalizedName);
   const contextText = cleanInvoiceText(context || "");
+  const hasSenderLabel = /보내는분|보낸분|보내는\s*분|발송인|발신인|고객명/i.test(contextText);
+  const hasSenderPhone = /050\d|010\d|050-\d|010-\d/i.test(contextText);
+  const hasBadLabel = /운송장번호|송장번호|접수일자|수입원|품명|제품명|상품명|모델명|분류코드|세부주소/i.test(contextText);
   const isCjReturnSenderArea =
-    /보내는분|보낸분|보내는\s*분|발송인|발신인|고객명|050\d|010\d|050-\d|010-\d|반품|링크맘|엄감|대한통운|CJ/i.test(contextText);
+    (hasSenderLabel || hasSenderPhone) && !(hasBadLabel && !hasSenderLabel && !hasSenderPhone);
 
   if (isTwoVisibleLetters && isCjReturnSenderArea) {
     return `${chars[0]}*${chars[1]}`;
@@ -112,6 +125,17 @@ function isValidCustomerNameCandidate(name: string) {
   const unmaskedName = normalizedName.replace(/\*/g, "");
   const blacklist = [
     "박승훈",
+    "일자",
+    "접수일자",
+    "수입원",
+    "운송장번호",
+    "송장번호",
+    "품명",
+    "제품명",
+    "상품명",
+    "모델명",
+    "개인정보",
+    "운송장은",
     "주식회사",
     "꿈비",
     "한진택배",
@@ -143,6 +167,23 @@ function isValidCustomerNameCandidate(name: string) {
 
 function extractMaskedCustomerName(rawText: string) {
   const raw = cleanInvoiceText(rawText);
+  const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!/보내는분|보낸분|보내는\s*분|발송인|발신인|고객명/i.test(line)) continue;
+
+    const segment = [line, lines[index + 1] || "", lines[index + 2] || ""].join(" ");
+    const phoneNameMatch = segment.match(/([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)\s*(?:0(?:10|50)\s*[-\d*]{6,})/);
+    const labelNameMatch = segment
+      .replace(/^.*?(?:보내는분|보낸분|보내는\s*분|발송인|발신인|고객명)\s*[:：]?\s*/i, "")
+      .match(/^([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)/);
+
+    const picked = phoneNameMatch?.[1] || labelNameMatch?.[1] || "";
+    const name = restoreMissingCustomerMask(picked, segment);
+    if (isValidCustomerNameCandidate(name)) return name;
+  }
+
   const nameCapture = "([가-힣][가-힣\\s*]{1,7})";
   const patterns = [
     new RegExp(`(?:보내는분|보낸분|보내는\\s*분|발송인|발신인|고객명)\\s*[:：]?\\s*${nameCapture}`, "g"),
@@ -198,8 +239,7 @@ function extractReturnType(rawText: string) {
 }
 
 function cleanProductCandidateText(value?: string) {
-  return (value || "")
-    .normalize("NFKC")
+  return normalizeProductOcrAliases(value)
     .replace(/[＊﹡✱✲]/g, "*")
     .replace(/품\s*명\s*[:：]?/gi, "")
     .replace(/제품명\s*[:：]?|상품명\s*[:：]?|모델명\s*[:：]?/gi, "")

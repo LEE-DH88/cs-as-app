@@ -3192,7 +3192,109 @@ export default function ReturnRecordApp() {
     return score;
   }
 
+  function findColorLockedProductOption(productSource?: string, rawText?: string) {
+    const options = getSelectableProductOptions();
+    const candidates = collectProductNameCandidates(productSource, rawText);
+    const colorKeywords = [
+      "베이지",
+      "아이보리",
+      "화이트",
+      "블랙",
+      "그레이",
+      "핑크",
+      "민트",
+      "블루",
+      "브라운",
+      "네이비",
+    ];
+
+    for (const candidate of candidates) {
+      const candidateCompact = compactProductMatchText(candidate);
+      const candidateColors = colorKeywords.filter((color) =>
+        candidateCompact.includes(compactProductMatchText(color))
+      );
+
+      if (!candidateColors.length) continue;
+
+      const coreKeywords = ["아이스허그", "듀얼팬", "쿨시트", "쿨링커버", "아기띠"].filter((keyword) =>
+        candidateCompact.includes(compactProductMatchText(keyword))
+      );
+
+      const matched = options.find((option) => {
+        const optionCompact = compactProductMatchText(option);
+        const colorMatched = candidateColors.some((color) =>
+          optionCompact.includes(compactProductMatchText(color))
+        );
+        if (!colorMatched) return false;
+
+        if (coreKeywords.length >= 2) {
+          return coreKeywords.every((keyword) =>
+            optionCompact.includes(compactProductMatchText(keyword))
+          );
+        }
+
+        return getTextSimilarityScore(candidate, option) >= 260;
+      });
+
+      if (matched) return matched;
+    }
+
+    return "";
+  }
+
+  function findStrongProductOptionByRawText(productSource?: string, rawText?: string) {
+    const colorLockedOption = findColorLockedProductOption(productSource, rawText);
+    if (colorLockedOption) return colorLockedOption;
+
+    const sourceCompact = compactProductMatchText(`${productSource || ""} ${rawText || ""}`);
+    if (!sourceCompact) return "";
+
+    const options = getSelectableProductOptions();
+    const colorKeywords = [
+      "베이지",
+      "아이보리",
+      "화이트",
+      "블랙",
+      "그레이",
+      "핑크",
+      "민트",
+      "블루",
+      "브라운",
+      "네이비",
+    ];
+
+    const sourceColors = colorKeywords.filter((color) =>
+      sourceCompact.includes(compactProductMatchText(color))
+    );
+
+    if (
+      sourceColors.length > 0 &&
+      /아이스허그/.test(sourceCompact) &&
+      /듀얼팬/.test(sourceCompact) &&
+      /쿨시트/.test(sourceCompact)
+    ) {
+      const matched = options.find((option) => {
+        const optionCompact = compactProductMatchText(option);
+        return (
+          /아이스허그/.test(optionCompact) &&
+          /듀얼팬/.test(optionCompact) &&
+          /쿨시트/.test(optionCompact) &&
+          sourceColors.some((color) =>
+            optionCompact.includes(compactProductMatchText(color))
+          )
+        );
+      });
+
+      if (matched) return matched;
+    }
+
+    return "";
+  }
+
   function findBestProductOption(productSource?: string, rawText?: string) {
+    const forcedOption = findStrongProductOptionByRawText(productSource, rawText);
+    if (forcedOption) return forcedOption;
+
     const options = getSelectableProductOptions();
     const sources = collectProductNameCandidates(productSource, rawText);
 
@@ -3254,6 +3356,9 @@ export default function ReturnRecordApp() {
     }
 
     if (value && options.includes(value as ProductSelectValue)) return value;
+
+    const rawProductCandidates = collectProductNameCandidates(undefined, rawText);
+    if (rawProductCandidates[0]) return cleanProductCandidateText(rawProductCandidates[0]);
 
     const productCandidates = collectProductNameCandidates(value, rawText);
     return productCandidates[0] ? cleanProductCandidateText(productCandidates[0]) : value || "";
@@ -3421,18 +3526,24 @@ export default function ReturnRecordApp() {
   }
 
   function restoreMissingCustomerMask(name: string, context?: string) {
-    const normalizedName = normalizeCustomerNameCandidate(name);
-
-    if (!normalizedName || normalizedName.includes("*")) return normalizedName;
-
-    const chars = Array.from(normalizedName);
-    const isTwoVisibleLetters = chars.length === 2 && /^[가-힣]{2}$/.test(normalizedName);
     const contextText = cleanOcrText(context || "");
     const hasSenderLabel = /보내는분|보낸분|보내는\s*분|발송인|발신인|고객명/i.test(contextText);
     const hasSenderPhone = /050\d|010\d|050-\d|010-\d/i.test(contextText);
     const hasBadLabel = /운송장번호|송장번호|접수일자|수입원|품명|제품명|상품명|모델명|분류코드|세부주소/i.test(contextText);
     const isCjReturnSenderArea =
       (hasSenderLabel || hasSenderPhone) && !(hasBadLabel && !hasSenderLabel && !hasSenderPhone);
+
+    let normalizedName = normalizeCustomerNameCandidate(name);
+
+    // "보내는분 정정"을 파싱할 때 라벨 끝 글자인 "분"이 이름에 붙는 경우 방지
+    if (isCjReturnSenderArea) {
+      normalizedName = normalizedName.replace(/^분(?=[가-힣*]{2,4}$)/, "");
+    }
+
+    if (!normalizedName || normalizedName.includes("*")) return normalizedName;
+
+    const chars = Array.from(normalizedName);
+    const isTwoVisibleLetters = chars.length === 2 && /^[가-힣]{2}$/.test(normalizedName);
 
     if (isTwoVisibleLetters && isCjReturnSenderArea) {
       return `${chars[0]}*${chars[1]}`;
@@ -3491,9 +3602,64 @@ export default function ReturnRecordApp() {
     return true;
   }
 
+  function extractCustomerNameFromSenderLabel(rawText?: string) {
+    const raw = cleanOcrText(rawText);
+    if (!raw) return "";
+
+    const senderLabelPattern = /(보내는\s*분|보내는분|보낸분|발송인|발신인|고객명)\s*[:：]?/i;
+    const badLinePattern = /운송장번호|송장번호|접수일자|받는분|수취인|품\s*명|제품명|상품명|모델명|분류코드|세부주소|하남시|안성시|대한통운|CJ/i;
+    const phonePattern = /(?:0(?:10|50)\s*[-\d*]{6,}|050-\d|010-\d)/i;
+    const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+
+    const pickName = (payload: string, context: string) => {
+      const cleanedPayload = payload
+        .replace(senderLabelPattern, " ")
+        .replace(/전화번호|연락처|핸드폰|휴대폰/gi, " ")
+        .replace(/[,，]+/g, " ")
+        .trim();
+
+      const maskedMatch = cleanedPayload.match(/([가-힣]\s*\*\s*[가-힣])/);
+      const phoneFrontMatch = cleanedPayload.match(/([가-힣]{2,4})\s*(?=0(?:10|50)|050-|010-)/);
+      const lineStartMatch = cleanedPayload.match(/^([가-힣]{2,4})(?=\s|$|[,/／|｜])/);
+      const picked = maskedMatch?.[1] || phoneFrontMatch?.[1] || lineStartMatch?.[1] || "";
+      const name = restoreMissingCustomerMask(picked, context);
+
+      return isValidCustomerNameCandidate(name) ? name : "";
+    };
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const labelMatch = line.match(senderLabelPattern);
+      if (!labelMatch || typeof labelMatch.index !== "number") continue;
+
+      const afterLabel = line.slice(labelMatch.index + labelMatch[0].length).trim();
+      const nextLine = lines[index + 1] || "";
+      const nextNextLine = lines[index + 2] || "";
+
+      const sameLineName = pickName(afterLabel, line);
+      if (sameLineName) return sameLineName;
+
+      if (nextLine && !badLinePattern.test(nextLine)) {
+        const nextLineName = pickName(nextLine, `${line} ${nextLine}`);
+        if (nextLineName) return nextLineName;
+      }
+
+      const segment = [afterLabel, nextLine, nextNextLine].join(" ").trim();
+      if (phonePattern.test(segment)) {
+        const segmentName = pickName(segment, `${line} ${segment}`);
+        if (segmentName) return segmentName;
+      }
+    }
+
+    return "";
+  }
+
   function extractCustomerNameFromRawText(rawText?: string) {
     const raw = cleanOcrText(rawText);
     if (!raw) return "";
+
+    const senderLabelName = extractCustomerNameFromSenderLabel(raw);
+    if (senderLabelName) return senderLabelName;
 
     const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
 
@@ -3502,12 +3668,14 @@ export default function ReturnRecordApp() {
       if (!/보내는분|보낸분|보내는\s*분|발송인|발신인|고객명/i.test(line)) continue;
 
       const segment = [line, lines[index + 1] || "", lines[index + 2] || ""].join(" ");
-      const phoneNameMatch = segment.match(/([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)\s*(?:0(?:10|50)\s*[-\d*]{6,})/);
-      const labelNameMatch = segment
+      const senderPayload = segment
         .replace(/^.*?(?:보내는분|보낸분|보내는\s*분|발송인|발신인|고객명)\s*[:：]?\s*/i, "")
-        .match(/^([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)/);
+        .trim();
+      const maskedLabelNameMatch = senderPayload.match(/^([가-힣]\s*\*\s*[가-힣])/);
+      const labelNameMatch = senderPayload.match(/^([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)(?=\s*(?:0(?:10|50)|050-|010-|$|[,/／|｜]))/);
+      const phoneNameMatch = senderPayload.match(/([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)\s*(?:0(?:10|50)\s*[-\d*]{6,})/);
 
-      const picked = phoneNameMatch?.[1] || labelNameMatch?.[1] || "";
+      const picked = maskedLabelNameMatch?.[1] || labelNameMatch?.[1] || phoneNameMatch?.[1] || "";
       const name = restoreMissingCustomerMask(picked, segment);
       if (isValidCustomerNameCandidate(name)) return name;
     }
@@ -3524,7 +3692,10 @@ export default function ReturnRecordApp() {
         const matchStart = Math.max(0, match.index - 45);
         const matchEnd = Math.min(raw.length, match.index + match[0].length + 45);
         const context = raw.slice(matchStart, matchEnd);
-        const name = restoreMissingCustomerMask(match[1], context);
+        const rawName = /보내는\s*분|보내는분/i.test(context)
+          ? normalizeCustomerNameCandidate(match[1]).replace(/^분(?=[가-힣*]{2,})/, "")
+          : match[1];
+        const name = restoreMissingCustomerMask(rawName, context);
         if (isValidCustomerNameCandidate(name)) return name;
       }
     }
@@ -3578,8 +3749,6 @@ export default function ReturnRecordApp() {
       if (clean && clean.length >= 2 && !candidates.includes(clean)) candidates.push(clean);
     };
 
-    pushCandidate(productSource);
-
     const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
 
     lines.forEach((line, index) => {
@@ -3619,6 +3788,9 @@ export default function ReturnRecordApp() {
     while ((afterPoMatch = afterPoPattern.exec(raw)) !== null) {
       pushCandidate(afterPoMatch[1]);
     }
+
+    // 서버가 이미 고른 제품명보다 송장 원문의 품명/하단 모델명을 먼저 신뢰합니다.
+    pushCandidate(productSource);
 
     return candidates;
   }

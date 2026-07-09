@@ -100,18 +100,23 @@ function normalizeCustomerNameCandidate(name: string) {
 }
 
 function restoreMissingCustomerMask(name: string, context?: string) {
-  const normalizedName = normalizeCustomerNameCandidate(name);
-
-  if (!normalizedName || normalizedName.includes("*")) return normalizedName;
-
-  const chars = Array.from(normalizedName);
-  const isTwoVisibleLetters = chars.length === 2 && /^[가-힣]{2}$/.test(normalizedName);
   const contextText = cleanInvoiceText(context || "");
   const hasSenderLabel = /보내는분|보낸분|보내는\s*분|발송인|발신인|고객명/i.test(contextText);
   const hasSenderPhone = /050\d|010\d|050-\d|010-\d/i.test(contextText);
   const hasBadLabel = /운송장번호|송장번호|접수일자|수입원|품명|제품명|상품명|모델명|분류코드|세부주소/i.test(contextText);
   const isCjReturnSenderArea =
     (hasSenderLabel || hasSenderPhone) && !(hasBadLabel && !hasSenderLabel && !hasSenderPhone);
+
+  let normalizedName = normalizeCustomerNameCandidate(name);
+
+  if (isCjReturnSenderArea) {
+    normalizedName = normalizedName.replace(/^분(?=[가-힣*]{2,4}$)/, "");
+  }
+
+  if (!normalizedName || normalizedName.includes("*")) return normalizedName;
+
+  const chars = Array.from(normalizedName);
+  const isTwoVisibleLetters = chars.length === 2 && /^[가-힣]{2}$/.test(normalizedName);
 
   if (isTwoVisibleLetters && isCjReturnSenderArea) {
     return `${chars[0]}*${chars[1]}`;
@@ -165,8 +170,63 @@ function isValidCustomerNameCandidate(name: string) {
   return true;
 }
 
+function extractCustomerNameFromSenderLabel(rawText: string) {
+  const raw = cleanInvoiceText(rawText);
+  if (!raw) return "";
+
+  const senderLabelPattern = /(보내는\s*분|보내는분|보낸분|발송인|발신인|고객명)\s*[:：]?/i;
+  const badLinePattern = /운송장번호|송장번호|접수일자|받는분|수취인|품\s*명|제품명|상품명|모델명|분류코드|세부주소|하남시|안성시|대한통운|CJ/i;
+  const phonePattern = /(?:0(?:10|50)\s*[-\d*]{6,}|050-\d|010-\d)/i;
+  const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  const pickName = (payload: string, context: string) => {
+    const cleanedPayload = payload
+      .replace(senderLabelPattern, " ")
+      .replace(/전화번호|연락처|핸드폰|휴대폰/gi, " ")
+      .replace(/[,，]+/g, " ")
+      .trim();
+
+    const maskedMatch = cleanedPayload.match(/([가-힣]\s*\*\s*[가-힣])/);
+    const phoneFrontMatch = cleanedPayload.match(/([가-힣]{2,4})\s*(?=0(?:10|50)|050-|010-)/);
+    const lineStartMatch = cleanedPayload.match(/^([가-힣]{2,4})(?=\s|$|[,/／|｜])/);
+    const picked = maskedMatch?.[1] || phoneFrontMatch?.[1] || lineStartMatch?.[1] || "";
+    const name = restoreMissingCustomerMask(picked, context);
+
+    return isValidCustomerNameCandidate(name) ? name : "";
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const labelMatch = line.match(senderLabelPattern);
+    if (!labelMatch || typeof labelMatch.index !== "number") continue;
+
+    const afterLabel = line.slice(labelMatch.index + labelMatch[0].length).trim();
+    const nextLine = lines[index + 1] || "";
+    const nextNextLine = lines[index + 2] || "";
+
+    const sameLineName = pickName(afterLabel, line);
+    if (sameLineName) return sameLineName;
+
+    if (nextLine && !badLinePattern.test(nextLine)) {
+      const nextLineName = pickName(nextLine, `${line} ${nextLine}`);
+      if (nextLineName) return nextLineName;
+    }
+
+    const segment = [afterLabel, nextLine, nextNextLine].join(" ").trim();
+    if (phonePattern.test(segment)) {
+      const segmentName = pickName(segment, `${line} ${segment}`);
+      if (segmentName) return segmentName;
+    }
+  }
+
+  return "";
+}
+
 function extractMaskedCustomerName(rawText: string) {
   const raw = cleanInvoiceText(rawText);
+  const directSenderName = extractCustomerNameFromSenderLabel(raw);
+  if (directSenderName) return directSenderName;
+
   const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -174,12 +234,14 @@ function extractMaskedCustomerName(rawText: string) {
     if (!/보내는분|보낸분|보내는\s*분|발송인|발신인|고객명/i.test(line)) continue;
 
     const segment = [line, lines[index + 1] || "", lines[index + 2] || ""].join(" ");
-    const phoneNameMatch = segment.match(/([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)\s*(?:0(?:10|50)\s*[-\d*]{6,})/);
-    const labelNameMatch = segment
+    const senderPayload = segment
       .replace(/^.*?(?:보내는분|보낸분|보내는\s*분|발송인|발신인|고객명)\s*[:：]?\s*/i, "")
-      .match(/^([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)/);
+      .trim();
+    const maskedLabelNameMatch = senderPayload.match(/^([가-힣]\s*\*\s*[가-힣])/);
+    const labelNameMatch = senderPayload.match(/^([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)(?=\s*(?:0(?:10|50)|050-|010-|$|[,/／|｜]))/);
+    const phoneNameMatch = senderPayload.match(/([가-힣]\s*\*?\s*[가-힣](?:\s*[가-힣])?)\s*(?:0(?:10|50)\s*[-\d*]{6,})/);
 
-    const picked = phoneNameMatch?.[1] || labelNameMatch?.[1] || "";
+    const picked = maskedLabelNameMatch?.[1] || labelNameMatch?.[1] || phoneNameMatch?.[1] || "";
     const name = restoreMissingCustomerMask(picked, segment);
     if (isValidCustomerNameCandidate(name)) return name;
   }
@@ -196,7 +258,10 @@ function extractMaskedCustomerName(rawText: string) {
       const matchStart = Math.max(0, match.index - 45);
       const matchEnd = Math.min(raw.length, match.index + match[0].length + 45);
       const context = raw.slice(matchStart, matchEnd);
-      const name = restoreMissingCustomerMask(match[1], context);
+      const rawName = /보내는\s*분|보내는분/i.test(context)
+        ? normalizeCustomerNameCandidate(match[1]).replace(/^분(?=[가-힣*]{2,})/, "")
+        : match[1];
+      const name = restoreMissingCustomerMask(rawName, context);
       if (isValidCustomerNameCandidate(name)) return name;
     }
   }

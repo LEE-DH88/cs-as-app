@@ -3034,22 +3034,194 @@ export default function ReturnRecordApp() {
     setEditingCreatedAt(null);
   }
 
+  function getSelectableProductOptions() {
+    return productOptionsForSelect.filter((option) => option && option !== "직접입력");
+  }
+
+  function normalizeProductMatchText(value?: string) {
+    return (value || "")
+      .normalize("NFKC")
+      .replace(/[\r\n]+/g, " ")
+      .replace(/[\[\](){},.ㆍ·:：\/／\\|｜_\-+~!@#$%^&*=<>?"'`]/g, " ")
+      .replace(/\bPO\s*20\d{8,18}\b/gi, " ")
+      .replace(/P\s*[O0]\s*20\d[\d\s-]{8,18}/gi, " ")
+      .replace(/\b20\d[\d\s-]{8,18}\b/g, " ")
+      .replace(/꿈비|곰비|품명|제품명|상품명|모델명|주문번호|운송장번호|송장번호|링크맘|엄감|일반반품|변심반품|불량반품|불량교환|검수|가품X|출고반품|반품/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toUpperCase();
+  }
+
+  function compactProductMatchText(value?: string) {
+    return normalizeProductMatchText(value).replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function getProductMatchTokens(value?: string) {
+    return normalizeProductMatchText(value)
+      .split(/\s+/g)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2)
+      .filter(
+        (token) =>
+          ![
+            "꿈비",
+            "품명",
+            "제품명",
+            "주문번호",
+            "베이지",
+            "아이보리",
+            "화이트",
+            "블랙",
+            "그레이",
+            "핑크",
+            "민트",
+            "BLUE",
+            "PINK",
+            "WHITE",
+            "BLACK",
+          ].includes(token)
+      );
+  }
+
+  function getTextSimilarityScore(source: string, option: string) {
+    const sourceCompact = compactProductMatchText(source);
+    const optionCompact = compactProductMatchText(option);
+
+    if (!sourceCompact || !optionCompact) return 0;
+
+    let score = 0;
+
+    if (sourceCompact === optionCompact) score += 1000;
+    if (sourceCompact.includes(optionCompact)) score += 650;
+    if (optionCompact.includes(sourceCompact) && sourceCompact.length >= 3) score += 520;
+
+    const sourceTokens = getProductMatchTokens(source);
+    const optionTokens = getProductMatchTokens(option);
+
+    optionTokens.forEach((token) => {
+      const compactToken = token.replace(/[^0-9A-Z가-힣]/g, "");
+      if (!compactToken) return;
+      if (sourceCompact.includes(compactToken)) score += Math.min(190, compactToken.length * 28);
+    });
+
+    sourceTokens.forEach((token) => {
+      const compactToken = token.replace(/[^0-9A-Z가-힣]/g, "");
+      if (!compactToken) return;
+      if (optionCompact.includes(compactToken)) score += Math.min(150, compactToken.length * 20);
+    });
+
+    const importantKeywords = [
+      "분리형",
+      "일체형",
+      "휴대용",
+      "분유포트",
+      "출수형",
+      "분유쉐이커",
+      "쉐이커",
+      "LED",
+      "젖병살균세척기",
+      "살균세척기",
+      "스팀플러스",
+      "아이스허그",
+      "듀얼팬",
+      "쿨시트",
+      "쿨링커버",
+      "아기띠",
+      "음식물처리기",
+      "세척기",
+    ];
+
+    importantKeywords.forEach((keyword) => {
+      const key = compactProductMatchText(keyword);
+      if (!key) return;
+      if (sourceCompact.includes(key) && optionCompact.includes(key)) score += 90;
+      if (sourceCompact.includes(key) && !optionCompact.includes(key)) score -= 12;
+    });
+
+    if (sourceCompact.includes("LED") && !optionCompact.includes("LED") && /쉐이커|세이커/.test(optionCompact)) {
+      score -= 180;
+    }
+
+    if (!sourceCompact.includes("LED") && optionCompact.includes("LED") && /쉐이커|세이커/.test(sourceCompact)) {
+      score -= 120;
+    }
+
+    if (sourceCompact.includes("분리형") && !optionCompact.includes("분리형") && optionCompact.includes("휴대용분유포트")) {
+      score -= 160;
+    }
+
+    if ((sourceCompact.includes("일체형") || sourceCompact.includes("출수형")) && optionCompact.includes("분리형")) {
+      score -= 140;
+    }
+
+    return score;
+  }
+
+  function findBestProductOption(productSource?: string, rawText?: string) {
+    const options = getSelectableProductOptions();
+    const sources = collectProductNameCandidates(productSource, rawText);
+
+    let bestOption = "";
+    let bestScore = 0;
+
+    sources.forEach((source, index) => {
+      options.forEach((option) => {
+        let score = getTextSimilarityScore(source, option);
+
+        if (index === 0 && productSource) score += 35;
+        if (/품\s*명|제품명|상품명|모델명/i.test(source)) score += 80;
+        if (/링크맘|엄감|PO\s*20|P\s*[O0]\s*20/i.test(source)) score += 35;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestOption = option;
+        }
+      });
+    });
+
+    return bestScore >= 95 ? bestOption : "";
+  }
+
   function normalizeProductName(value?: string, rawText?: string) {
-    const text = `${value || ""} ${rawText || ""}`.replace(/\s+/g, "");
+    const sourceText = `${value || ""} ${rawText || ""}`;
+    const compact = compactProductMatchText(sourceText);
+    const options = getSelectableProductOptions();
+    const bestOption = findBestProductOption(value, rawText);
 
-    if (text.includes("분리형")) {
-      return "(분리형) 휴대용분유포트";
+    if (bestOption) return bestOption;
+
+    const pickExistingOption = (target: string) =>
+      options.find((option) => normalizeProductOptionText(option) === target) || "";
+
+    if (/분리형|분리/.test(compact)) {
+      const splitPortablePot = pickExistingOption("(분리형) 휴대용분유포트");
+      if (splitPortablePot) return splitPortablePot;
     }
 
-    if (/젖병살균세척기|젖병세척기|살균세척기|스팀플러스|스팀PLUS/i.test(text)) {
-      return "젖병살균세척기";
+    if (/젖병살균세척기|젖병세척기|살균세척기|스팀플러스|스팀PLUS/i.test(compact)) {
+      const sterilizer = pickExistingOption("젖병살균세척기");
+      if (sterilizer) return sterilizer;
     }
 
-    if (value && productOptionsForSelect.includes(value as ProductSelectValue)) {
-      return value;
+    if ((/LED|엘이디/i.test(sourceText) || /뭉침없이조용한/.test(compact)) && /쉐이커|세이커/.test(compact)) {
+      const ledShaker = pickExistingOption("LED분유쉐이커");
+      if (ledShaker) return ledShaker;
     }
 
-    return value || "";
+    if (/분유쉐이커|분유세이커|쉐이커|세이커/.test(compact)) {
+      const shaker = pickExistingOption("분유쉐이커");
+      if (shaker) return shaker;
+    }
+
+    if (/휴대용|분유포트|보온포트|포트/.test(compact)) {
+      const portablePot = pickExistingOption("휴대용분유포트");
+      if (portablePot && !/분리형|분리/.test(compact)) return portablePot;
+    }
+
+    if (value && options.includes(value as ProductSelectValue)) return value;
+
+    const productCandidates = collectProductNameCandidates(value, rawText);
+    return productCandidates[0] ? cleanProductCandidateText(productCandidates[0]) : value || "";
   }
 
   function detectReturnType(parsed: OcrParsedResult) {
@@ -3090,19 +3262,40 @@ export default function ReturnRecordApp() {
 
   function cleanOcrText(value?: string) {
     return (value || "")
+      .normalize("NFKC")
       .replace(/\r/g, "\n")
       .replace(/[|｜]/g, " ")
       .replace(/[★☆]/g, " ★ ")
-      .replace(/\s+/g, " ")
+      .replace(/[＊﹡✱✲]/g, "*")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{2,}/g, "\n")
       .trim();
   }
 
   function compactOcrText(value?: string) {
-    return (value || "").replace(/\s+/g, "");
+    return (value || "").normalize("NFKC").replace(/[＊﹡✱✲]/g, "*").replace(/\s+/g, "");
+  }
+
+  function cleanOrderNumberCandidate(candidate: string) {
+    const normalized = (candidate || "")
+      .normalize("NFKC")
+      .replace(/[＊﹡✱✲]/g, "*")
+      .replace(/\s+/g, "")
+      .replace(/[.,;:：)\]}]+$/g, "")
+      .replace(/^[^A-Z0-9]+/i, "");
+
+    if (/^P[O0]20\d{8,18}$/i.test(normalized)) {
+      return normalized.replace(/^P[O0]/i, "PO");
+    }
+
+    return normalized;
   }
 
   function isLikelyOrderNumberCandidate(candidate: string, context: string) {
-    const cleanCandidate = candidate.replace(/\s+/g, "").replace(/[.,;:)]$/g, "");
+    const cleanCandidate = cleanOrderNumberCandidate(candidate);
+
+    if (/^PO20\d{8,18}$/i.test(cleanCandidate)) return true;
+
     const onlyDigits = cleanCandidate.replace(/^C/i, "").replace(/-/g, "");
 
     if (!/^C?20\d{7,16}$/i.test(onlyDigits.startsWith("20") ? onlyDigits : cleanCandidate.replace(/-/g, ""))) {
@@ -3117,7 +3310,7 @@ export default function ReturnRecordApp() {
     const badContext =
       /운송장번호|송장번호|예약번호|예악번호|접수일자|운임TYPE|운임TYPE|수량|발지|전화|고객센터|1588|1644/i;
 
-    if (badContext.test(context) && !/일반반품|변심반품|불량반품|불량교환|링크맘|엄감|분리형|분유|포트|쉐이커/i.test(context)) {
+    if (badContext.test(context) && !/주문번호|일반반품|변심반품|불량반품|불량교환|링크맘|엄감|분리형|분유|포트|쉐이커|쿨시트|쿨링커버|아기띠/i.test(context)) {
       return false;
     }
 
@@ -3127,6 +3320,29 @@ export default function ReturnRecordApp() {
   function extractOrderNumberFromRawText(rawText?: string) {
     const raw = cleanOcrText(rawText);
     if (!raw) return "";
+
+    const poCandidates: { value: string; score: number }[] = [];
+    const poPattern = /P\s*[O0]\s*20\d[\d\s-]{8,18}/gi;
+    let poMatch: RegExpExecArray | null;
+
+    while ((poMatch = poPattern.exec(raw)) !== null) {
+      const value = cleanOrderNumberCandidate(poMatch[0]);
+      if (!/^PO20\d{8,18}$/i.test(value)) continue;
+
+      const start = Math.max(0, poMatch.index - 65);
+      const end = Math.min(raw.length, poMatch.index + poMatch[0].length + 65);
+      const context = raw.slice(start, end);
+
+      let score = 200 + value.length;
+      if (/주문번호|링크맘|엄감|일반반품|변심반품|불량반품|불량교환|검수/i.test(context)) score += 120;
+      if (/품명|모델명|분유포트|쉐이커|쿨시트|쿨링커버|아기띠/i.test(context)) score += 40;
+      if (/운송장번호|송장번호|전화|010|050|1588|1644/i.test(context)) score -= 35;
+
+      poCandidates.push({ value, score });
+    }
+
+    poCandidates.sort((a, b) => b.score - a.score);
+    if (poCandidates[0]) return poCandidates[0].value;
 
     const candidates: { value: string; score: number }[] = [];
     const patterns = [
@@ -3138,7 +3354,7 @@ export default function ReturnRecordApp() {
     patterns.forEach((pattern) => {
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(raw)) !== null) {
-        const value = match[0].replace(/\s+/g, "").replace(/[.,;:)]$/g, "");
+        const value = cleanOrderNumberCandidate(match[0]);
         const start = Math.max(0, match.index - 45);
         const end = Math.min(raw.length, match.index + match[0].length + 45);
         const context = raw.slice(start, end);
@@ -3148,7 +3364,7 @@ export default function ReturnRecordApp() {
 
         let score = digits.length;
         if (/일반반품|변심반품|불량반품|불량교환|링크맘|엄감|상품|교환/i.test(context)) score += 80;
-        if (/분리형|휴대용|분유포트|분유쉐이커|쉐이커|LED/i.test(context)) score += 40;
+        if (/분리형|휴대용|분유포트|분유쉐이커|쉐이커|LED|쿨시트|쿨링커버|아기띠/i.test(context)) score += 40;
         if (/^C/i.test(value)) score += 25;
         if (/주문번호/i.test(context)) score += 20;
         if (/예약번호|접수일자|운송장번호|5737|0507|050-|1588|1644/i.test(context)) score -= 60;
@@ -3161,7 +3377,17 @@ export default function ReturnRecordApp() {
     return candidates[0]?.value || "";
   }
 
+  function normalizeCustomerNameCandidate(name: string) {
+    return (name || "")
+      .normalize("NFKC")
+      .replace(/[＊﹡✱✲]/g, "*")
+      .replace(/\s+/g, "")
+      .replace(/^[^가-힣]+|[^가-힣*]+$/g, "");
+  }
+
   function isValidCustomerNameCandidate(name: string) {
+    const normalizedName = normalizeCustomerNameCandidate(name);
+    const unmaskedName = normalizedName.replace(/\*/g, "");
     const blacklist = [
       "박승훈",
       "착지신용",
@@ -3169,6 +3395,8 @@ export default function ReturnRecordApp() {
       "주식회사",
       "꿈비",
       "한진택배",
+      "대한통운",
+      "CJ",
       "회수상품",
       "운송장",
       "주문번호",
@@ -3179,6 +3407,9 @@ export default function ReturnRecordApp() {
       "고삼면",
       "미록로",
       "봉산리",
+      "하남시",
+      "하남사이",
+      "하산국",
       "링크맘",
       "엄감",
       "분리형",
@@ -3187,8 +3418,9 @@ export default function ReturnRecordApp() {
       "쉐이커",
     ];
 
-    if (!/^[가-힣]{2,4}$/.test(name)) return false;
-    if (blacklist.some((word) => name.includes(word) || word.includes(name))) return false;
+    if (!/^[가-힣][가-힣*]{1,5}$/.test(normalizedName)) return false;
+    if (!/^[가-힣]{2,4}$/.test(unmaskedName)) return false;
+    if (blacklist.some((word) => normalizedName.includes(word) || unmaskedName.includes(word) || word.includes(unmaskedName))) return false;
     return true;
   }
 
@@ -3196,36 +3428,38 @@ export default function ReturnRecordApp() {
     const raw = cleanOcrText(rawText);
     if (!raw) return "";
 
+    const nameCapture = "([가-힣][가-힣\\s*]{1,7})";
     const senderPatterns = [
-      /(?:보내는분|보낸분|보내는\s*분|발송인|발신인|고객명)\s*[:：]?\s*([가-힣]{2,4})/g,
-      /([가-힣]{2,4})\s*(?:050\d|010\d|050-\d|010-\d)/g,
+      new RegExp(`(?:보내는분|보낸분|보내는\\s*분|발송인|발신인|고객명)\\s*[:：]?\\s*${nameCapture}`, "g"),
+      new RegExp(`${nameCapture}\\s*(?:050\\d|010\\d|050-\\d|010-\\d)`, "g"),
     ];
 
     for (const pattern of senderPatterns) {
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(raw)) !== null) {
-        const name = match[1];
+        const name = normalizeCustomerNameCandidate(match[1]);
         if (isValidCustomerNameCandidate(name)) return name;
       }
     }
 
     const candidates: { value: string; score: number }[] = [];
-    const namePattern = /[가-힣]{2,4}/g;
+    const namePattern = /[가-힣](?:\s*\*?\s*[가-힣]){1,3}/g;
     let match: RegExpExecArray | null;
 
     while ((match = namePattern.exec(raw)) !== null) {
-      const value = match[0];
+      const value = normalizeCustomerNameCandidate(match[0]);
       if (!isValidCustomerNameCandidate(value)) continue;
 
       const start = Math.max(0, match.index - 35);
-      const end = Math.min(raw.length, match.index + value.length + 35);
+      const end = Math.min(raw.length, match.index + match[0].length + 35);
       const context = raw.slice(start, end);
 
       let score = 0;
-      if (/보내는분|보낸분|발송인|발신인|고객명/i.test(context)) score += 100;
-      if (/050\d|010\d|050-\d|010-\d/i.test(context)) score += 45;
-      if (/불량교환|불량반품|변심반품|일반반품|분리형|휴대용|분유포트|쉐이커|LED/i.test(context)) score += 30;
-      if (/받는분|안성시|고삼면|링크맘|엄감|주식회사|꿈비/i.test(context)) score -= 70;
+      if (/보내는분|보낸분|발송인|발신인|고객명/i.test(context)) score += 120;
+      if (/050\d|010\d|050-\d|010-\d/i.test(context)) score += 55;
+      if (value.includes("*")) score += 80;
+      if (/불량교환|불량반품|변심반품|일반반품|분리형|휴대용|분유포트|쉐이커|LED|쿨시트|쿨링커버/i.test(context)) score += 20;
+      if (/받는분|안성시|고삼면|하남사이|하산국|대한통운|링크맘|엄감|주식회사|꿈비/i.test(context)) score -= 90;
       if (value === "박승훈") score -= 200;
 
       candidates.push({ value, score });
@@ -3235,7 +3469,71 @@ export default function ReturnRecordApp() {
     return candidates[0]?.score > 0 ? candidates[0].value : "";
   }
 
+  function cleanProductCandidateText(value?: string) {
+    return (value || "")
+      .normalize("NFKC")
+      .replace(/[＊﹡✱✲]/g, "*")
+      .replace(/품\s*명\s*[:：]?/gi, "")
+      .replace(/제품명\s*[:：]?|상품명\s*[:：]?|모델명\s*[:：]?/gi, "")
+      .replace(/주문번호\s*[:：]?\s*P\s*[O0]\s*20\d[\d\s-]{8,18}/gi, "")
+      .replace(/P\s*[O0]\s*20\d[\d\s-]{8,18}/gi, "")
+      .replace(/\b20\d[\d\s-]{8,18}\b/g, "")
+      .replace(/링크맘|엄감|일반반품|변심반품|불량반품|불량교환|검수|가품X|출고반품|반품/g, " ")
+      .replace(/[★☆]/g, " ")
+      .replace(/^[\s\/／\\|｜:：\-]+|[\s\/／\\|｜:：\-]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function collectProductNameCandidates(productSource?: string, rawText?: string) {
+    const raw = cleanOcrText(rawText);
+    const candidates: string[] = [];
+    const pushCandidate = (value?: string) => {
+      const clean = cleanProductCandidateText(value);
+      if (clean && clean.length >= 2 && !candidates.includes(clean)) candidates.push(clean);
+    };
+
+    pushCandidate(productSource);
+
+    const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+
+    lines.forEach((line, index) => {
+      if (/품\s*명|제품명|상품명|모델명/i.test(line)) {
+        const afterLabel = line.replace(/^.*?(품\s*명|제품명|상품명|모델명)\s*[:：]?\s*/i, "");
+        pushCandidate(afterLabel);
+        pushCandidate(`${afterLabel} ${lines[index + 1] || ""}`);
+      }
+
+      if (/링크맘|엄감|일반반품|변심반품|불량반품|불량교환|검수|P\s*[O0]\s*20/i.test(line)) {
+        const parts = line.split(/[\/／|｜]/g).map((part) => part.trim()).filter(Boolean);
+        parts.forEach((part) => {
+          if (/P\s*[O0]\s*20|20\d{8,18}|링크맘|엄감|일반반품|변심반품|불량반품|불량교환|검수/i.test(part)) return;
+          pushCandidate(part);
+        });
+        const afterPo = line.match(/P\s*[O0]\s*20\d[\d\s-]{8,18}\s*[\/／|｜]?\s*([^\/／|｜\n]+)/i);
+        if (afterPo?.[1]) pushCandidate(afterPo[1]);
+      }
+    });
+
+    const productLabelPattern = /(?:품\s*명|제품명|상품명|모델명)\s*[:：]?\s*([^\n]+)/gi;
+    let labelMatch: RegExpExecArray | null;
+    while ((labelMatch = productLabelPattern.exec(raw)) !== null) {
+      pushCandidate(labelMatch[1]);
+    }
+
+    const afterPoPattern = /P\s*[O0]\s*20\d[\d\s-]{8,18}\s*[\/／|｜]?\s*([^\/／|｜\n]+)/gi;
+    let afterPoMatch: RegExpExecArray | null;
+    while ((afterPoMatch = afterPoPattern.exec(raw)) !== null) {
+      pushCandidate(afterPoMatch[1]);
+    }
+
+    return candidates;
+  }
+
   function extractProductNameFromRawText(rawText?: string) {
+    const bestOption = findBestProductOption(undefined, rawText);
+    if (bestOption) return bestOption;
+
     const compact = compactOcrText(rawText);
 
     if (/젖병살균세척기|젖병세척기|살균세척기|스팀플러스|스팀PLUS/i.test(compact)) {
@@ -3258,14 +3556,18 @@ export default function ReturnRecordApp() {
       return "휴대용분유포트";
     }
 
-    return "";
+    return collectProductNameCandidates(undefined, rawText)[0] || "";
   }
 
   function repairOcrParsedResult(parsed: OcrParsedResult) {
     const rawText = parsed.rawText || "";
-    const orderNumber = parsed.orderNumber || extractOrderNumberFromRawText(rawText);
-    const customerName = parsed.customerName || extractCustomerNameFromRawText(rawText);
-    const productName = parsed.productName || extractProductNameFromRawText(rawText);
+    const extractedOrderNumber = extractOrderNumberFromRawText(rawText);
+    const extractedCustomerName = extractCustomerNameFromRawText(rawText);
+    const extractedProductName = extractProductNameFromRawText(rawText);
+
+    const orderNumber = extractedOrderNumber || parsed.orderNumber || "";
+    const customerName = extractedCustomerName || parsed.customerName || "";
+    const productName = extractedProductName || parsed.productName || "";
 
     return {
       ...parsed,

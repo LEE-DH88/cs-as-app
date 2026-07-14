@@ -1,121 +1,35 @@
-import { list, put } from "@vercel/blob";
+import { readStringArrayConfig, writeStringArrayConfig } from "@/app/lib/google-storage";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-const PRODUCT_OPTIONS_BLOB_PATH = "return-record/product-options.json";
+const CONFIG_NAME = "사용자 제품명 목록";
+const DEFAULT_PRODUCT_OPTIONS = ["휴대용분유포트", "(분리형) 휴대용분유포트", "분유쉐이커", "LED분유쉐이커", "젖병살균세척기"];
 
-const DEFAULT_PRODUCT_OPTIONS = [
-  "휴대용분유포트",
-  "(분리형) 휴대용분유포트",
-  "분유쉐이커",
-  "LED분유쉐이커",
-  "젖병살균세척기",
-];
-
-function normalizeProductOptionText(value: string) {
-  return value.replace(/\s+/g, " ").trim();
+function normalize(value: unknown) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function getUniqueProductOptions(options: string[]) {
-  const optionSet = new Set<string>();
-
-  options.forEach((option) => {
-    const normalized = normalizeProductOptionText(option);
-
-    if (normalized && normalized !== "직접입력") {
-      optionSet.add(normalized);
-    }
-  });
-
-  return Array.from(optionSet);
+function unique(values: unknown[]) {
+  return Array.from(new Set(values.map(normalize).filter(Boolean)));
 }
 
-function getCustomOnlyOptions(options: string[]) {
-  return getUniqueProductOptions(options).filter(
-    (option) => !DEFAULT_PRODUCT_OPTIONS.includes(option)
-  );
+function onlyCustom(values: unknown[]) {
+  return unique(values).filter((value) => !DEFAULT_PRODUCT_OPTIONS.includes(value) && value !== "직접입력");
 }
 
-function isDefaultProductOption(option: string) {
-  return DEFAULT_PRODUCT_OPTIONS.includes(normalizeProductOptionText(option));
-}
-
-function getProductOptionsPayload(customProductOptions: string[]) {
-  return {
-    customProductOptions,
-    productOptions: getUniqueProductOptions([
-      ...DEFAULT_PRODUCT_OPTIONS,
-      ...customProductOptions,
-    ]),
-  };
-}
-
-async function readCustomProductOptions() {
-  const { blobs } = await list({
-    prefix: PRODUCT_OPTIONS_BLOB_PATH,
-    limit: 1,
-  });
-
-  const targetBlob = blobs.find(
-    (blob) => blob.pathname === PRODUCT_OPTIONS_BLOB_PATH
-  );
-
-  if (!targetBlob?.url) return [];
-
-  const response = await fetch(`${targetBlob.url}?t=${Date.now()}`, {
-    cache: "no-store",
-  });
-
-  if (!response.ok) return [];
-
-  const data = await response.json().catch(() => null);
-
-  return getCustomOnlyOptions(
-    Array.isArray(data?.customProductOptions)
-      ? data.customProductOptions.map((item: unknown) => String(item))
-      : Array.isArray(data?.productOptions)
-        ? data.productOptions.map((item: unknown) => String(item))
-        : []
-  );
-}
-
-async function writeCustomProductOptions(customProductOptions: string[]) {
-  const nextCustomProductOptions = getCustomOnlyOptions(customProductOptions);
-
-  await put(
-    PRODUCT_OPTIONS_BLOB_PATH,
-    JSON.stringify(
-      {
-        customProductOptions: nextCustomProductOptions,
-        updatedAt: new Date().toISOString(),
-      },
-      null,
-      2
-    ),
-    {
-      access: "public",
-      allowOverwrite: true,
-      contentType: "application/json",
-    }
-  );
-
-  return nextCustomProductOptions;
+async function payload() {
+  const customProductOptions = onlyCustom(await readStringArrayConfig(CONFIG_NAME));
+  return { customProductOptions, productOptions: unique([...DEFAULT_PRODUCT_OPTIONS, ...customProductOptions]) };
 }
 
 export async function GET() {
   try {
-    const customProductOptions = await readCustomProductOptions();
-
-    return NextResponse.json(getProductOptionsPayload(customProductOptions));
+    return NextResponse.json(await payload());
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "제품명 목록 조회에 실패했습니다.",
-      },
+      { error: error instanceof Error ? error.message : "제품명 목록 조회에 실패했습니다." },
       { status: 500 }
     );
   }
@@ -124,37 +38,16 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const incomingOptions = [
+    const current = onlyCustom(await readStringArrayConfig(CONFIG_NAME));
+    const incoming = [
       ...(typeof body?.option === "string" ? [body.option] : []),
-      ...(Array.isArray(body?.options)
-        ? body.options.map((item: unknown) => String(item))
-        : []),
+      ...(Array.isArray(body?.options) ? body.options : []),
     ];
-
-    const normalizedIncomingOptions = getCustomOnlyOptions(incomingOptions);
-
-    if (normalizedIncomingOptions.length === 0) {
-      return NextResponse.json(
-        { error: "추가할 제품명을 입력해주세요." },
-        { status: 400 }
-      );
-    }
-
-    const currentCustomProductOptions = await readCustomProductOptions();
-    const customProductOptions = await writeCustomProductOptions([
-      ...currentCustomProductOptions,
-      ...normalizedIncomingOptions,
-    ]);
-
-    return NextResponse.json(getProductOptionsPayload(customProductOptions));
+    const customProductOptions = await writeStringArrayConfig(CONFIG_NAME, onlyCustom([...current, ...incoming]));
+    return NextResponse.json({ customProductOptions, productOptions: unique([...DEFAULT_PRODUCT_OPTIONS, ...customProductOptions]) });
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "제품명 저장에 실패했습니다.",
-      },
+      { error: error instanceof Error ? error.message : "제품명 저장에 실패했습니다." },
       { status: 500 }
     );
   }
@@ -163,76 +56,29 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const currentOption = normalizeProductOptionText(
-      typeof body?.option === "string" ? body.option : ""
+    const option = normalize(body?.option);
+    const nextOption = normalize(body?.nextOption);
+
+    if (!option || !nextOption) {
+      return NextResponse.json({ error: "수정할 제품명을 입력해주세요." }, { status: 400 });
+    }
+    if (DEFAULT_PRODUCT_OPTIONS.includes(option)) {
+      return NextResponse.json({ error: "기본 제품명은 수정할 수 없습니다." }, { status: 400 });
+    }
+
+    const current = onlyCustom(await readStringArrayConfig(CONFIG_NAME));
+    if (!current.includes(option)) {
+      return NextResponse.json({ error: "수정할 제품명을 찾지 못했습니다." }, { status: 404 });
+    }
+
+    const customProductOptions = await writeStringArrayConfig(
+      CONFIG_NAME,
+      onlyCustom(current.map((value) => (value === option ? nextOption : value)))
     );
-    const nextOption = normalizeProductOptionText(
-      typeof body?.nextOption === "string" ? body.nextOption : ""
-    );
-
-    if (!currentOption || !nextOption) {
-      return NextResponse.json(
-        { error: "수정할 제품명과 변경할 제품명을 입력해주세요." },
-        { status: 400 }
-      );
-    }
-
-    if (currentOption === "직접입력" || nextOption === "직접입력") {
-      return NextResponse.json(
-        { error: "'직접입력'은 수정할 수 없습니다." },
-        { status: 400 }
-      );
-    }
-
-    if (isDefaultProductOption(currentOption)) {
-      return NextResponse.json(
-        { error: "기본 제품명은 보호 항목이라 수정할 수 없습니다." },
-        { status: 400 }
-      );
-    }
-
-    const currentCustomProductOptions = await readCustomProductOptions();
-
-    if (!currentCustomProductOptions.includes(currentOption)) {
-      return NextResponse.json(
-        { error: "수정할 제품명을 찾지 못했습니다." },
-        { status: 404 }
-      );
-    }
-
-    if (currentOption === nextOption) {
-      return NextResponse.json(
-        getProductOptionsPayload(currentCustomProductOptions)
-      );
-    }
-
-    const duplicated = getUniqueProductOptions([
-      ...DEFAULT_PRODUCT_OPTIONS,
-      ...currentCustomProductOptions.filter((option) => option !== currentOption),
-    ]).includes(nextOption);
-
-    if (duplicated) {
-      return NextResponse.json(
-        { error: "이미 등록된 제품명입니다." },
-        { status: 409 }
-      );
-    }
-
-    const customProductOptions = await writeCustomProductOptions(
-      currentCustomProductOptions.map((option) =>
-        option === currentOption ? nextOption : option
-      )
-    );
-
-    return NextResponse.json(getProductOptionsPayload(customProductOptions));
+    return NextResponse.json({ customProductOptions, productOptions: unique([...DEFAULT_PRODUCT_OPTIONS, ...customProductOptions]) });
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "제품명 수정에 실패했습니다.",
-      },
+      { error: error instanceof Error ? error.message : "제품명 수정에 실패했습니다." },
       { status: 500 }
     );
   }
@@ -241,53 +87,18 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const option = normalizeProductOptionText(
-      typeof body?.option === "string" ? body.option : ""
-    );
-
-    if (!option) {
-      return NextResponse.json(
-        { error: "삭제할 제품명을 입력해주세요." },
-        { status: 400 }
-      );
+    const option = normalize(body?.option);
+    if (!option) return NextResponse.json({ error: "삭제할 제품명을 입력해주세요." }, { status: 400 });
+    if (DEFAULT_PRODUCT_OPTIONS.includes(option)) {
+      return NextResponse.json({ error: "기본 제품명은 삭제할 수 없습니다." }, { status: 400 });
     }
 
-    if (option === "직접입력") {
-      return NextResponse.json(
-        { error: "'직접입력'은 삭제할 수 없습니다." },
-        { status: 400 }
-      );
-    }
-
-    if (isDefaultProductOption(option)) {
-      return NextResponse.json(
-        { error: "기본 제품명은 보호 항목이라 삭제할 수 없습니다." },
-        { status: 400 }
-      );
-    }
-
-    const currentCustomProductOptions = await readCustomProductOptions();
-
-    if (!currentCustomProductOptions.includes(option)) {
-      return NextResponse.json(
-        { error: "삭제할 제품명을 찾지 못했습니다." },
-        { status: 404 }
-      );
-    }
-
-    const customProductOptions = await writeCustomProductOptions(
-      currentCustomProductOptions.filter((item) => item !== option)
-    );
-
-    return NextResponse.json(getProductOptionsPayload(customProductOptions));
+    const current = onlyCustom(await readStringArrayConfig(CONFIG_NAME));
+    const customProductOptions = await writeStringArrayConfig(CONFIG_NAME, current.filter((value) => value !== option));
+    return NextResponse.json({ customProductOptions, productOptions: unique([...DEFAULT_PRODUCT_OPTIONS, ...customProductOptions]) });
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "제품명 삭제에 실패했습니다.",
-      },
+      { error: error instanceof Error ? error.message : "제품명 삭제에 실패했습니다." },
       { status: 500 }
     );
   }

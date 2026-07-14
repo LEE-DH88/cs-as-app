@@ -1,34 +1,26 @@
-import { put } from "@vercel/blob";
+import { uploadDriveFile } from "@/app/lib/google-storage";
 import { NextResponse } from "next/server";
 
-export async function POST(request: Request): Promise<NextResponse> {
+export const runtime = "nodejs";
+
+export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    const folder = (formData.get("folder") as string | null) ?? "misc";
+    const file = formData.get("file");
 
-    if (!file) {
-      return NextResponse.json(
-        { error: "파일이 없습니다." },
-        { status: 400 }
-      );
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "이미지 파일이 없습니다." }, { status: 400 });
     }
 
-    const pathname = `ggumbi-return-record/${folder}/${Date.now()}-${file.name}`;
+    if (!file.type.startsWith("image/")) {
+      return NextResponse.json({ error: "이미지 파일만 업로드할 수 있습니다." }, { status: 400 });
+    }
 
-    const blob = await put(pathname, file, {
-      access: "public",
-      addRandomSuffix: true,
-      contentType: file.type || "image/jpeg",
-    });
-
-    return NextResponse.json(blob);
+    const photo = await uploadDriveFile(file);
+    return NextResponse.json(photo);
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "업로드 실패",
-      },
+      { error: error instanceof Error ? error.message : "Google Drive 사진 업로드에 실패했습니다." },
       { status: 500 }
     );
   }

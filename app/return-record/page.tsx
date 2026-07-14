@@ -70,6 +70,7 @@ type UploadedPhoto = {
   filename: string;
   size: number;
   contentType?: string;
+  driveFileId?: string;
 };
 
 type ReturnRecord = {
@@ -1973,7 +1974,7 @@ async function compressImage(file: File): Promise<File> {
 
 function openPhotoInNewTab(photo: UploadedPhoto) {
   if (!photo.url) {
-    window.alert("사진 링크가 없습니다.");
+    window.alert("사진은 기록 저장 후 Google Drive에서 열 수 있습니다.");
     return;
   }
 
@@ -2007,12 +2008,14 @@ async function uploadSingleFile(
     filename: optimized.name,
     size: optimized.size,
     contentType: optimized.type,
+    driveFileId: data.driveFileId,
   };
 }
 
 export default function ReturnRecordApp() {
   const [records, setRecords] = useState<ReturnRecord[]>([]);
-  const [loadingRecords, setLoadingRecords] = useState(true);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+  const [recordsLoaded, setRecordsLoaded] = useState(false);
   const [savingRecord, setSavingRecord] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
@@ -2144,12 +2147,16 @@ export default function ReturnRecordApp() {
     };
   }, []);
 
-  async function fetchRecords() {
+  async function fetchRecords(options: { startDate?: string; endDate?: string } = {}) {
     try {
       setLoadingRecords(true);
       setStatusError("");
 
-      const response = await fetch("/api/records", {
+      const params = new URLSearchParams();
+      if (options.startDate) params.set("startDate", options.startDate);
+      if (options.endDate) params.set("endDate", options.endDate);
+      const query = params.toString();
+      const response = await fetch(`/api/records${query ? `?${query}` : ""}`, {
         cache: "no-store",
       });
       const data = await response.json();
@@ -2159,6 +2166,7 @@ export default function ReturnRecordApp() {
       }
 
       setRecords(Array.isArray(data.records) ? data.records : []);
+      setRecordsLoaded(true);
     } catch (error) {
       setStatusError(
         error instanceof Error ? error.message : "기록을 불러오지 못했습니다."
@@ -2195,8 +2203,15 @@ export default function ReturnRecordApp() {
   }
 
   useEffect(() => {
-    fetchRecords();
-  }, []);
+    if (
+      !recordsLoaded &&
+      (activePanel === "dashboard" ||
+        activePanel === "normalizationReport" ||
+        activePanel === "modelReport")
+    ) {
+      void fetchRecords();
+    }
+  }, [activePanel, recordsLoaded]);
 
   function getLegacyCustomDefectiveNoteOptions() {
     try {
@@ -2632,7 +2647,11 @@ export default function ReturnRecordApp() {
     return recordSearchSubmitted ? filteredRecords : [];
   }, [recordSearchSubmitted, filteredRecords]);
 
-  function handleSearchRecords() {
+  async function handleSearchRecords() {
+    await fetchRecords({
+      startDate: searchStartDate || undefined,
+      endDate: searchEndDate || undefined,
+    });
     setRecordSearchSubmitted(true);
     setSelectedRecordIds([]);
     setExpandedPhotoRecordIds([]);
@@ -4003,38 +4022,14 @@ export default function ReturnRecordApp() {
     const confirmed = window.confirm("이 사진을 삭제하시겠습니까?");
     if (!confirmed) return;
 
-    try {
-      setStatusError("");
-      setStatusMessage("사진 삭제 중입니다...");
-
-      const response = await fetch("/api/delete-blob", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          urls: [photo.url],
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "사진 삭제에 실패했습니다.");
-      }
-
-      if (type === "invoice") {
-        setInvoicePhotos((prev) => prev.filter((item) => item.url !== photo.url));
-      } else {
-        setProductPhotos((prev) => prev.filter((item) => item.url !== photo.url));
-      }
-
-      setStatusMessage("사진이 삭제되었습니다.");
-    } catch (error) {
-      setStatusError(
-        error instanceof Error ? error.message : "사진 삭제 중 오류가 발생했습니다."
-      );
+    if (type === "invoice") {
+      setInvoicePhotos((prev) => prev.filter((item) => item !== photo));
+    } else {
+      setProductPhotos((prev) => prev.filter((item) => item !== photo));
     }
+
+    setStatusError("");
+    setStatusMessage("사진이 목록에서 제거되었습니다. 수정 저장 시 Google Drive에도 반영됩니다.");
   }
 
   function handleEditRecord(record: ReturnRecord) {
@@ -4248,12 +4243,12 @@ export default function ReturnRecordApp() {
         throw new Error(data?.error || "기록 저장에 실패했습니다.");
       }
 
-      upsertRecordInState(newRecord);
+      upsertRecordInState(data.record || newRecord);
       resetForm();
       setStatusMessage(
         isEditing
-          ? "기록이 수정되었습니다."
-          : "기록이 서버에 저장되었습니다. PC와 휴대폰에서 동일하게 조회됩니다."
+          ? "기록이 수정되었고 Google Sheets와 Drive에도 반영되었습니다."
+          : "기록이 Google Sheets와 Drive에 저장되었습니다. PC와 휴대폰에서 동일하게 조회됩니다."
       );
     } catch (error) {
       setStatusError(
@@ -4271,11 +4266,7 @@ export default function ReturnRecordApp() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        id: record.id,
-        photoUrls: [
-          ...record.invoicePhotos.map((photo) => photo.url),
-          ...record.productPhotos.map((photo) => photo.url),
-        ],
+        ...record,
       }),
     });
 
@@ -4367,7 +4358,7 @@ export default function ReturnRecordApp() {
     }
 
     const confirmed = window.confirm(
-      `이 기록의 사진 ${photoUrls.length}장을 Blob에서 삭제하시겠습니까?\n텍스트 기록은 그대로 유지됩니다.\n별도 백업이 필요하면 삭제 전에 사진 링크를 먼저 보관해주세요.`
+      `이 기록의 사진 ${photoUrls.length}장을 Google Drive에서 삭제하시겠습니까?\n텍스트 기록은 그대로 유지됩니다.`
     );
 
     if (!confirmed) return;
@@ -4376,22 +4367,6 @@ export default function ReturnRecordApp() {
       setCleaningPhotoRecordId(record.id);
       setStatusError("");
       setStatusMessage("90일 초과 사진을 삭제 중입니다...");
-
-      const deleteResponse = await fetch("/api/delete-blob", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          urls: photoUrls,
-        }),
-      });
-
-      const deleteData = await deleteResponse.json();
-
-      if (!deleteResponse.ok) {
-        throw new Error(deleteData?.error || "사진 삭제에 실패했습니다.");
-      }
 
       const updatedRecord: ReturnRecord = {
         ...record,
@@ -4413,9 +4388,9 @@ export default function ReturnRecordApp() {
         throw new Error(saveData?.error || "사진 삭제 기록 반영에 실패했습니다.");
       }
 
-      upsertRecordInState(updatedRecord);
+      upsertRecordInState(saveData.record || updatedRecord);
       setExpandedPhotoRecordIds((prev) => prev.filter((id) => id !== record.id));
-      setStatusMessage("90일 초과 사진이 삭제되었고, 텍스트 기록은 유지되었습니다.");
+      setStatusMessage("90일 초과 사진이 Google Drive에서 삭제되었고, 텍스트 기록은 유지되었습니다.");
     } catch (error) {
       setStatusError(
         error instanceof Error ? error.message : "사진 정리 중 오류가 발생했습니다."
@@ -4550,7 +4525,7 @@ export default function ReturnRecordApp() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
-              onClick={fetchRecords}
+              onClick={() => void fetchRecords()}
               disabled={loadingRecords}
               className="rounded-2xl border-white/80 bg-white/85 shadow-sm hover:bg-white"
             >
@@ -4820,7 +4795,7 @@ export default function ReturnRecordApp() {
                     <div>
                       <p className="text-sm font-black text-slate-900">사용량 관리</p>
                       <p className="mt-1 text-xs font-medium text-slate-500">
-                        Blob 접근을 아끼는 설정입니다.
+                        Google Drive 사진은 필요할 때만 여는 설정입니다.
                       </p>
                     </div>
                     <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-500 text-white shadow-sm">
@@ -6192,7 +6167,7 @@ export default function ReturnRecordApp() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl bg-white"
-                      onClick={fetchRecords}
+                      onClick={() => void fetchRecords()}
                     >
                       <RefreshCw className="mr-2 h-4 w-4" />
                       새로고침
@@ -6789,7 +6764,7 @@ export default function ReturnRecordApp() {
                                     <p className="font-bold">90일 초과 사진 정리 대상</p>
                                     <p className="mt-1 leading-6">
                                       등록 후 {ageDays ?? "90일 초과"}일 경과한 기록입니다.
-                                      Blob 단순 연산 절감을 위해 사진 보기 버튼은 숨김 처리했습니다.
+                                      사진은 Google Drive에서 보관되며, 필요 시 정리할 수 있습니다.
                                       필요 시 별도 백업 후 사진만 삭제하세요.
                                     </p>
                                     <p className="mt-1 text-xs">
@@ -6972,7 +6947,7 @@ export default function ReturnRecordApp() {
                   <ul className="mt-3 space-y-2 text-sm font-medium text-slate-700">
                     <li>• 최근 90일 사진은 접힘 상태로 관리합니다.</li>
                     <li>• 90일 초과 사진은 삭제 또는 별도 백업 대상입니다.</li>
-                    <li>• Blob 사용량 절감을 위해 자동 미리보기는 사용하지 않습니다.</li>
+                    <li>• 사진 자동 미리보기 없이 필요할 때만 Google Drive 사진을 엽니다.</li>
                   </ul>
                 </div>
 
@@ -6987,7 +6962,7 @@ export default function ReturnRecordApp() {
               </div>
 
               <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-black text-slate-900">Vercel 사용량 절감 원칙</p>
+                <p className="text-sm font-black text-slate-900">서버 사용량 절감 원칙</p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
                   <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">사진 자동조회 OFF</span>
                   <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">조회 후 표시</span>

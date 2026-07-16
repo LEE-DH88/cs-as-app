@@ -7,7 +7,7 @@ export async function GET(request: Request) {
     openapi: "3.1.0",
     info: {
       title: "꿈비 반품 처리 GPT API",
-      version: "1.0.0",
+      version: "1.0.1",
       description:
         "반품 처리 기록 조회·등록과 기간별 엑셀 다운로드 링크 생성을 위한 비공개 GPT Action API",
     },
@@ -21,7 +21,19 @@ export async function GET(request: Request) {
           responses: {
             "200": {
               description: "정상 연결",
-              content: { "application/json": { schema: { type: "object" } } },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: { type: "boolean" },
+                      service: { type: "string" },
+                      timestamp: { type: "string" },
+                    },
+                    required: ["ok", "service", "timestamp"],
+                  },
+                },
+              },
             },
           },
         },
@@ -42,7 +54,27 @@ export async function GET(request: Request) {
           responses: {
             "200": {
               description: "조회 결과",
-              content: { "application/json": { schema: { type: "object" } } },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      filters: { type: "object", additionalProperties: true },
+                      summary: {
+                        type: "object",
+                        properties: {
+                          total: { type: "integer" },
+                          normal: { type: "integer" },
+                          defective: { type: "integer" },
+                          pending: { type: "integer" },
+                          followUp: { type: "integer" },
+                        },
+                      },
+                      records: { type: "array", items: { type: "object", additionalProperties: true } },
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -88,11 +120,32 @@ export async function GET(request: Request) {
           responses: {
             "201": {
               description: "등록 완료",
-              content: { "application/json": { schema: { type: "object" } } },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean" },
+                      message: { type: "string" },
+                      record: { type: "object", additionalProperties: true },
+                    },
+                  },
+                },
+              },
             },
             "409": {
               description: "중복 의심 기록",
-              content: { "application/json": { schema: { type: "object" } } },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      error: { type: "string" },
+                      duplicate: { type: "object", additionalProperties: true },
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -119,13 +172,28 @@ export async function GET(request: Request) {
           responses: {
             "200": {
               description: "10분 동안 유효한 다운로드 링크",
-              content: { "application/json": { schema: { type: "object" } } },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean" },
+                      filename: { type: "string" },
+                      summary: { type: "object", additionalProperties: true },
+                      downloadUrl: { type: "string", format: "uri" },
+                      expiresInMinutes: { type: "integer" },
+                      note: { type: "string" },
+                    },
+                  },
+                },
+              },
             },
           },
         },
       },
     },
     components: {
+      schemas: {},
       securitySchemes: {
         bearerAuth: {
           type: "http",

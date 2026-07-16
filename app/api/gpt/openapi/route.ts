@@ -7,9 +7,9 @@ export async function GET(request: Request) {
     openapi: "3.1.0",
     info: {
       title: "꿈비 반품 처리 GPT API",
-      version: "1.0.1",
+      version: "1.1.0",
       description:
-        "반품 처리 기록 조회·등록과 기간별 엑셀 다운로드 링크 생성을 위한 비공개 GPT Action API",
+        "반품 처리 기록 조회·등록, 기간별 엑셀 생성, 노션 상세 기록 및 처리현황 동기화를 위한 비공개 GPT Action API",
     },
     servers: [{ url: origin }],
     security: [{ bearerAuth: [] }],
@@ -49,7 +49,11 @@ export async function GET(request: Request) {
             { name: "orderNumber", in: "query", schema: { type: "string" } },
             { name: "productName", in: "query", schema: { type: "string" } },
             { name: "inspectionResult", in: "query", schema: { type: "string" } },
-            { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 200, default: 50 } },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+            },
           ],
           responses: {
             "200": {
@@ -70,7 +74,10 @@ export async function GET(request: Request) {
                           followUp: { type: "integer" },
                         },
                       },
-                      records: { type: "array", items: { type: "object", additionalProperties: true } },
+                      records: {
+                        type: "array",
+                        items: { type: "object", additionalProperties: true },
+                      },
                     },
                   },
                 },
@@ -93,10 +100,20 @@ export async function GET(request: Request) {
                   additionalProperties: false,
                   required: ["returnType", "productName", "inspectionResult"],
                   properties: {
-                    createdDate: { type: "string", format: "date", description: "미입력 시 오늘 날짜" },
+                    createdDate: {
+                      type: "string",
+                      format: "date",
+                      description: "미입력 시 오늘 날짜",
+                    },
                     invoiceNumber: { type: "string", description: "송장번호" },
-                    orderNumber: { type: "string", description: "주문번호, PO 접두 포함 가능" },
-                    customerName: { type: "string", description: "고객명, 마스킹 표기 유지 권장" },
+                    orderNumber: {
+                      type: "string",
+                      description: "주문번호, PO 접두 포함 가능",
+                    },
+                    customerName: {
+                      type: "string",
+                      description: "고객명, 마스킹 표기 유지 권장",
+                    },
                     returnType: {
                       type: "string",
                       enum: ["일반반품", "변심반품", "불량반품", "불량교환", "AS", "검수"],
@@ -183,6 +200,122 @@ export async function GET(request: Request) {
                       downloadUrl: { type: "string", format: "uri" },
                       expiresInMinutes: { type: "integer" },
                       note: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/gpt/notion-sync": {
+        get: {
+          operationId: "checkNotionConnection",
+          summary: "노션 데이터베이스 연결 상태 확인",
+          responses: {
+            "200": {
+              description: "노션 연결 정상",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: { type: "boolean" },
+                      notionVersion: { type: "string" },
+                      rawDataSource: { type: "string" },
+                      summaryDataSource: { type: "string" },
+                    },
+                    required: [
+                      "ok",
+                      "notionVersion",
+                      "rawDataSource",
+                      "summaryDataSource",
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          operationId: "syncReturnRecordsToNotion",
+          summary: "기간별 반품 기록을 노션에 동기화",
+          description:
+            "처음에는 dryRun=true로 실행해 예정 건수를 보여주세요. 사용자가 명시적으로 승인한 뒤에만 dryRun=false로 실제 노션 반영을 실행하세요. 프로그램 ID와 날짜·제품·처리결과를 기준으로 중복을 방지합니다.",
+          "x-openai-isConsequential": true,
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["startDate", "endDate", "dryRun"],
+                  properties: {
+                    startDate: {
+                      type: "string",
+                      format: "date",
+                      description: "동기화 시작일",
+                    },
+                    endDate: {
+                      type: "string",
+                      format: "date",
+                      description: "동기화 종료일",
+                    },
+                    dryRun: {
+                      type: "boolean",
+                      description:
+                        "true이면 미리보기만 수행하고 노션에 쓰지 않음. 사용자 승인 후 false로 실행",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "동기화 미리보기 또는 실행 결과",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean" },
+                      dryRun: { type: "boolean" },
+                      period: {
+                        type: "object",
+                        properties: {
+                          startDate: { type: "string" },
+                          endDate: { type: "string" },
+                        },
+                      },
+                      sourceRecords: { type: "integer" },
+                      raw: {
+                        type: "object",
+                        properties: {
+                          createPlanned: { type: "integer" },
+                          created: { type: "integer" },
+                          skippedExisting: { type: "integer" },
+                          failed: { type: "integer" },
+                        },
+                      },
+                      summary: {
+                        type: "object",
+                        properties: {
+                          eligibleSourceRecords: { type: "integer" },
+                          rowsCalculated: { type: "integer" },
+                          createPlanned: { type: "integer" },
+                          updatePlanned: { type: "integer" },
+                          unchanged: { type: "integer" },
+                          created: { type: "integer" },
+                          updated: { type: "integer" },
+                          failed: { type: "integer" },
+                        },
+                      },
+                      errors: {
+                        type: "array",
+                        items: { type: "string" },
+                      },
                     },
                   },
                 },

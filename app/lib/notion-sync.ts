@@ -361,8 +361,7 @@ function dateRangeFilter(property: string, startDate: string, endDate: string) {
 
 async function existingProgramIds(startDate: string, endDate: string) {
   const pages = await queryAllPages(RAW_DATA_SOURCE_ID, {
-    filter: dateRangeFilter("등록일자", startDate, endDate),
-    filter_properties: ["프로그램 ID"],
+    filter: dateRangeFilter("등록일자", startDate, endDate)
   });
   return new Set(
     pages
@@ -373,8 +372,7 @@ async function existingProgramIds(startDate: string, endDate: string) {
 
 async function existingSummaryRows(startDate: string, endDate: string) {
   const pages = await queryAllPages(SUMMARY_DATA_SOURCE_ID, {
-    filter: dateRangeFilter("처리일", startDate, endDate),
-    filter_properties: ["처리일", "제품명", "처리결과", "처리수량"],
+    filter: dateRangeFilter("처리일", startDate, endDate)
   });
 
   const rows = new Map<string, ExistingSummaryRow>();

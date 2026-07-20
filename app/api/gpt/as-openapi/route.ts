@@ -7,9 +7,9 @@ export async function GET(request: Request) {
     openapi: "3.1.0",
     info: {
       title: "꿈비 AS·품질 분석 GPT API",
-      version: "1.0.1",
+      version: "1.1.0",
       description:
-        "AS 제품 지식과 품질검수 자료를 노션에서 안전하게 조회하기 위한 비공개 GPT Action API",
+        "AS 제품 지식과 품질검수 자료 조회, 반품검사 기록의 반복 품질 문제 분석을 위한 비공개 GPT Action API",
     },
     servers: [{ url: origin }],
     security: [{ bearerAuth: [] }],
@@ -87,6 +87,175 @@ export async function GET(request: Request) {
             },
             "400": {
               description: "검색어 또는 노션 연결 오류",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      error: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": {
+              description: "인증 실패",
+            },
+          },
+        },
+      },
+      "/api/gpt/quality-analysis": {
+        post: {
+          operationId: "analyzeRecurringProductIssues",
+          summary: "반품검사 기록에서 반복 품질 문제 분석",
+          description:
+            "선택 기간을 직전 동일 길이의 기간과 비교합니다. 동일 제품·증상 3건 이상, 50% 이상 증가 또는 안전 관련 증상 1건 이상을 경고로 표시합니다.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["startDate", "endDate"],
+                  properties: {
+                    startDate: {
+                      type: "string",
+                      format: "date",
+                      description: "분석 시작일",
+                    },
+                    endDate: {
+                      type: "string",
+                      format: "date",
+                      description: "분석 종료일",
+                    },
+                    productName: {
+                      type: "string",
+                      description:
+                        "선택 입력. 입력하면 해당 문구가 포함된 제품만 분석",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "반복 품질 문제 분석 결과",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean" },
+                      period: {
+                        type: "object",
+                        properties: {
+                          startDate: { type: "string" },
+                          endDate: { type: "string" },
+                          days: { type: "integer" },
+                        },
+                      },
+                      comparisonPeriod: {
+                        type: "object",
+                        properties: {
+                          startDate: { type: "string" },
+                          endDate: { type: "string" },
+                          days: { type: "integer" },
+                        },
+                      },
+                      filters: {
+                        type: "object",
+                        properties: {
+                          productName: { type: "string" },
+                        },
+                      },
+                      thresholds: {
+                        type: "object",
+                        properties: {
+                          recurringCount: { type: "integer" },
+                          increaseRatePercent: { type: "number" },
+                          safetySingleCaseAlert: { type: "boolean" },
+                        },
+                      },
+                      sourceRecords: {
+                        type: "object",
+                        properties: {
+                          current: { type: "integer" },
+                          previous: { type: "integer" },
+                        },
+                      },
+                      summary: {
+                        type: "object",
+                        properties: {
+                          detectedIssueGroups: { type: "integer" },
+                          alerts: { type: "integer" },
+                          urgentAlerts: { type: "integer" },
+                          cautionAlerts: { type: "integer" },
+                        },
+                      },
+                      alerts: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            productName: { type: "string" },
+                            symptom: { type: "string" },
+                            currentCount: { type: "integer" },
+                            previousCount: { type: "integer" },
+                            changeRatePercent: { type: "number" },
+                            trend: { type: "string" },
+                            risk: {
+                              type: "string",
+                              enum: ["일반", "주의", "긴급"],
+                            },
+                            isAlert: { type: "boolean" },
+                            triggerReasons: {
+                              type: "array",
+                              items: { type: "string" },
+                            },
+                            evidenceSamples: {
+                              type: "array",
+                              items: { type: "string" },
+                            },
+                          },
+                        },
+                      },
+                      issues: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            productName: { type: "string" },
+                            symptom: { type: "string" },
+                            currentCount: { type: "integer" },
+                            previousCount: { type: "integer" },
+                            changeRatePercent: { type: "number" },
+                            trend: { type: "string" },
+                            risk: {
+                              type: "string",
+                              enum: ["일반", "주의", "긴급"],
+                            },
+                            isAlert: { type: "boolean" },
+                            triggerReasons: {
+                              type: "array",
+                              items: { type: "string" },
+                            },
+                            evidenceSamples: {
+                              type: "array",
+                              items: { type: "string" },
+                            },
+                          },
+                        },
+                      },
+                      note: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "날짜 또는 분석 조건 오류",
               content: {
                 "application/json": {
                   schema: {

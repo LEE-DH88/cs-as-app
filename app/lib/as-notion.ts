@@ -173,7 +173,13 @@ function sanitizeLine(text: string) {
 function blockText(block: NotionBlock) {
   const value = block[block.type];
   if (!value || typeof value !== "object") return "";
-  return collectText((value as { rich_text?: unknown }).rich_text).join(" ").trim();
+
+  const blockValue = value as Record<string, unknown>;
+  const richText = collectText(blockValue.rich_text).join(" ").trim();
+  const titleText =
+    typeof blockValue.title === "string" ? normalized(blockValue.title) : "";
+
+  return [titleText, richText].filter(Boolean).join(" ").trim();
 }
 
 async function readBlockLines(
@@ -181,7 +187,7 @@ async function readBlockLines(
   depth = 0,
   budget = { chars: 12000 }
 ): Promise<string[]> {
-  if (depth > 2 || budget.chars <= 0) return [];
+  if (depth > 3 || budget.chars <= 0) return [];
 
   const lines: string[] = [];
   let cursor: string | null = null;
@@ -251,10 +257,42 @@ export async function checkAsNotionAccess() {
   };
 }
 
+function searchTokens(query: string) {
+  return [
+    ...new Set(
+      normalized(query)
+        .split(/[\s,./|()[\]{}:;·]+/)
+        .map((token) => compact(token))
+        .filter((token) => token.length >= 2)
+    ),
+  ];
+}
+
+function tokenScore(text: string, tokens: string[]) {
+  const haystack = compact(text);
+  return tokens.reduce(
+    (score, token) => score + (haystack.includes(token) ? 1 : 0),
+    0
+  );
+}
+
 function matchingExcerpt(lines: string[], query: string) {
-  const target = compact(query);
-  const matches = lines.filter((line) => compact(line).includes(target));
-  return (matches.length ? matches : lines.slice(0, 8)).join("\n").slice(0, 5000);
+  const tokens = searchTokens(query);
+  const ranked = lines
+    .map((line, index) => ({
+      line,
+      index,
+      score: tokenScore(line, tokens),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const selected =
+    ranked.length > 0
+      ? ranked.slice(0, 12).map((item) => item.line)
+      : lines.slice(0, 8);
+
+  return selected.join("\n").slice(0, 5000);
 }
 
 async function queryDataSourcePages(dataSourceId: string) {
@@ -287,24 +325,31 @@ export async function searchAsKnowledge(query: string, limit = 5) {
   }
 
   const safeLimit = Math.min(Math.max(Math.trunc(limit) || 5, 1), 10);
-  const target = compact(searchWord);
-  const items: AsKnowledgeItem[] = [];
+  const tokens = searchTokens(searchWord);
+  if (tokens.length === 0) {
+    throw new Error("두 글자 이상의 검색어를 입력해주세요.");
+  }
+
+  const candidates: Array<{ item: AsKnowledgeItem; score: number }> = [];
 
   for (const source of KNOWLEDGE_PAGES) {
-    if (items.length >= safeLimit) break;
     try {
       const page = await notionRequest<NotionPage>(`/pages/${source.id}`);
       const lines = await readBlockLines(source.id);
       const title = pageTitle(page.properties);
-      if (!compact(`${title} ${lines.join(" ")}`).includes(target)) continue;
+      const score = tokenScore(`${title} ${lines.join(" ")}`, tokens);
+      if (score === 0) continue;
 
-      items.push({
-        source: source.label,
-        title,
-        pageId: page.id,
-        url: page.url || "",
-        lastEditedTime: page.last_edited_time || "",
-        excerpt: matchingExcerpt(lines, searchWord),
+      candidates.push({
+        score,
+        item: {
+          source: source.label,
+          title,
+          pageId: page.id,
+          url: page.url || "",
+          lastEditedTime: page.last_edited_time || "",
+          excerpt: matchingExcerpt(lines, searchWord),
+        },
       });
     } catch {
       // 연결 상태 조회에서 접근 실패 자료를 별도로 표시한다.
@@ -312,18 +357,21 @@ export async function searchAsKnowledge(query: string, limit = 5) {
   }
 
   for (const source of QUALITY_DATA_SOURCES) {
-    if (items.length >= safeLimit) break;
     try {
       const pages = await queryDataSourcePages(source.id);
-      for (const page of pages) {
-        if (items.length >= safeLimit) break;
 
+      for (const page of pages) {
         const propertyLines = Object.values(page.properties || {})
           .flatMap((property) => collectText(property))
           .map(sanitizeLine)
           .filter(Boolean);
+
         const title = pageTitle(page.properties);
-        if (!compact(`${title} ${propertyLines.join(" ")}`).includes(target)) continue;
+        const propertyText = `${title} ${propertyLines.join(" ")}`;
+        const propertyScore = tokenScore(propertyText, tokens);
+
+        // API 사용량을 줄이기 위해 제목과 속성에서 검색어가 하나라도 잡힌 행만 본문을 읽는다.
+        if (propertyScore === 0) continue;
 
         let bodyLines: string[] = [];
         try {
@@ -332,13 +380,18 @@ export async function searchAsKnowledge(query: string, limit = 5) {
           bodyLines = [];
         }
 
-        items.push({
-          source: source.label,
-          title,
-          pageId: page.id,
-          url: page.url || "",
-          lastEditedTime: page.last_edited_time || "",
-          excerpt: matchingExcerpt([...propertyLines, ...bodyLines], searchWord),
+        const score = tokenScore(`${propertyText} ${bodyLines.join(" ")}`, tokens);
+
+        candidates.push({
+          score,
+          item: {
+            source: source.label,
+            title,
+            pageId: page.id,
+            url: page.url || "",
+            lastEditedTime: page.last_edited_time || "",
+            excerpt: matchingExcerpt([...propertyLines, ...bodyLines], searchWord),
+          },
         });
       }
     } catch {
@@ -346,13 +399,22 @@ export async function searchAsKnowledge(query: string, limit = 5) {
     }
   }
 
+  const items = candidates
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.item.lastEditedTime.localeCompare(a.item.lastEditedTime)
+    )
+    .slice(0, safeLimit)
+    .map((candidate) => candidate.item);
+
   return {
     query: searchWord,
     count: items.length,
     items,
     note:
       items.length === 0
-        ? "검색 결과가 없거나 해당 노션 자료가 API 통합에 공유되지 않았습니다."
-        : "민감정보가 포함된 줄과 개인정보는 결과에서 제외했습니다.",
+        ? "각 핵심 검색어와 일치하는 자료가 없습니다. query를 생략해 노션 자료별 접근 상태도 확인해주세요."
+        : "입력한 문장을 핵심 단어로 나누어 관련도가 높은 순서로 검색했습니다. 민감정보와 개인정보는 제외했습니다.",
   };
 }

@@ -7,7 +7,7 @@ export async function GET(request: Request) {
     openapi: "3.1.0",
     info: {
       title: "꿈비 AS·품질 분석 GPT API",
-      version: "1.0.0",
+      version: "1.0.1",
       description:
         "AS 제품 지식과 품질검수 자료를 노션에서 안전하게 조회하기 위한 비공개 GPT Action API",
     },
@@ -45,7 +45,42 @@ export async function GET(request: Request) {
                 "application/json": {
                   schema: {
                     type: "object",
-                    additionalProperties: true,
+                    properties: {
+                      success: { type: "boolean" },
+                      ok: { type: "boolean" },
+                      notionVersion: { type: "string" },
+                      accessibleCount: { type: "integer" },
+                      totalCount: { type: "integer" },
+                      query: { type: "string" },
+                      count: { type: "integer" },
+                      note: { type: "string" },
+                      resources: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            label: { type: "string" },
+                            type: { type: "string" },
+                            accessible: { type: "boolean" },
+                            error: { type: "string" },
+                          },
+                        },
+                      },
+                      items: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            source: { type: "string" },
+                            title: { type: "string" },
+                            pageId: { type: "string" },
+                            url: { type: "string" },
+                            lastEditedTime: { type: "string" },
+                            excerpt: { type: "string" },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
